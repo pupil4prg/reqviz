@@ -1,0 +1,46 @@
+{
+  "format": "reqviz/system",
+  "format_version": 1,
+  "system": {
+    "name": "Web三層",
+    "description": "Java などの Web 三層システムで、業務の流量からスレッド数・DB コネクション・OS パラメータまでを算出するひな形"
+  },
+  "layers": [
+    {"key": "biz", "name": "業務要件", "sort_order": 0},
+    {"key": "nfr", "name": "非機能要件", "sort_order": 1},
+    {"key": "app", "name": "アプリケーション設計", "sort_order": 2},
+    {"key": "db", "name": "DB設計", "sort_order": 3},
+    {"key": "os", "name": "OS/インフラ設計", "sort_order": 4}
+  ],
+  "params": [
+    {"layer": "biz", "key": "business_type", "name": "業務特性", "type": "enum", "enum_options": ["online", "batch"], "value": "online", "unit": "", "source": "manual", "rationale": "オンライン中心の受付業務", "ref_doc": "業務要件定義書", "owner": ""},
+    {"layer": "biz", "key": "peak_tps", "name": "ピーク時リクエスト数", "type": "number", "enum_options": [], "value": 200, "unit": "req/s", "source": "manual", "rationale": "年間ピーク日の実績 × 成長率 1.2", "ref_doc": "業務量調査", "owner": ""},
+    {"layer": "biz", "key": "avg_response_sec", "name": "平均処理時間", "type": "number", "enum_options": [], "value": 0.5, "unit": "秒", "source": "manual", "rationale": "現行システムの実測値", "ref_doc": "性能測定結果", "owner": ""},
+    {"layer": "nfr", "key": "safety_factor", "name": "安全係数", "type": "number", "enum_options": [], "value": 1.5, "unit": "倍", "source": "manual", "rationale": "スパイク対策", "ref_doc": "非機能要件定義書", "owner": ""},
+    {"layer": "nfr", "key": "target_response_sec", "name": "目標応答時間", "type": "number", "enum_options": [], "value": 2, "unit": "秒", "source": "manual", "rationale": "", "ref_doc": "非機能要件定義書", "owner": ""},
+    {"layer": "app", "key": "concurrent_requests", "name": "同時処理リクエスト数", "type": "number", "enum_options": [], "value": null, "unit": "件", "source": "formula", "rationale": "リトルの法則: 到着率 × 処理時間 × 安全係数", "ref_doc": "", "owner": ""},
+    {"layer": "app", "key": "server_count", "name": "APサーバー台数", "type": "number", "enum_options": [], "value": 3, "unit": "台", "source": "manual", "rationale": "冗長構成（N+1）", "ref_doc": "", "owner": ""},
+    {"layer": "app", "key": "threads_per_server", "name": "APサーバーあたりスレッド数", "type": "number", "enum_options": [], "value": null, "unit": "本", "source": "formula", "rationale": "", "ref_doc": "", "owner": ""},
+    {"layer": "db", "key": "pool_ratio", "name": "DB接続比率", "type": "number", "enum_options": [], "value": null, "unit": "", "source": "formula", "rationale": "スレッドのうち DB を同時に使う割合", "ref_doc": "", "owner": ""},
+    {"layer": "db", "key": "pool_per_server", "name": "APサーバーあたりコネクションプール数", "type": "number", "enum_options": [], "value": null, "unit": "本", "source": "formula", "rationale": "", "ref_doc": "", "owner": ""},
+    {"layer": "db", "key": "reserved_connections", "name": "管理用予約コネクション数", "type": "number", "enum_options": [], "value": 10, "unit": "本", "source": "manual", "rationale": "運用・監視・バッチ用", "ref_doc": "", "owner": ""},
+    {"layer": "db", "key": "max_connections", "name": "DB最大コネクション数", "type": "number", "enum_options": [], "value": 200, "unit": "本", "source": "manual", "rationale": "", "ref_doc": "", "owner": ""},
+    {"layer": "os", "key": "max_user_processes", "name": "ユーザーあたり最大プロセス数 (nproc)", "type": "number", "enum_options": [], "value": 4096, "unit": "", "source": "manual", "rationale": "", "ref_doc": "", "owner": ""},
+    {"layer": "os", "key": "max_open_files", "name": "最大オープンファイル数 (nofile)", "type": "number", "enum_options": [], "value": 65536, "unit": "", "source": "manual", "rationale": "", "ref_doc": "", "owner": ""}
+  ],
+  "rules": [
+    {"key": "F-001", "kind": "formula", "target": "app.concurrent_requests", "expression": "ceil(biz.peak_tps * biz.avg_response_sec * nfr.safety_factor)", "nl_text": null, "severity": "error", "description": "リトルの法則による同時処理数", "enabled": true},
+    {"key": "F-002", "kind": "formula", "target": "app.threads_per_server", "expression": "ceil(app.concurrent_requests / app.server_count)", "nl_text": null, "severity": "error", "description": "サーバー台数で均等に分散", "enabled": true},
+    {"key": "F-003", "kind": "formula", "target": "db.pool_ratio", "expression": "0.5 if biz.business_type == 'online' else 0.2", "nl_text": null, "severity": "error", "description": "業務特性による DB 接続比率", "enabled": true},
+    {"key": "F-004", "kind": "formula", "target": "db.pool_per_server", "expression": "ceil(app.threads_per_server * db.pool_ratio)", "nl_text": null, "severity": "error", "description": "スレッド数 × 接続比率", "enabled": true},
+    {"key": "C-001", "kind": "constraint", "target": null, "expression": "db.pool_per_server * app.server_count + db.reserved_connections <= db.max_connections", "nl_text": null, "severity": "error", "description": "全 AP のプール合計 + 予約数が DB の上限以内", "enabled": true},
+    {"key": "C-002", "kind": "constraint", "target": null, "expression": "os.max_user_processes >= app.threads_per_server * 2", "nl_text": null, "severity": "warning", "description": "nproc はスレッド数の 2 倍以上", "enabled": true},
+    {"key": "C-003", "kind": "constraint", "target": null, "expression": "os.max_open_files >= (app.threads_per_server + db.pool_per_server) * 10", "nl_text": null, "severity": "warning", "description": "nofile はスレッドとコネクションの 10 倍以上", "enabled": true},
+    {"key": "C-004", "kind": "constraint", "target": null, "expression": "biz.avg_response_sec <= nfr.target_response_sec", "nl_text": null, "severity": "error", "description": "平均処理時間が目標応答時間以内", "enabled": true},
+    {"key": "N-001", "kind": "nl", "target": "db.pool_per_server", "expression": null, "nl_text": "バッチ中心の業務では、DB のプール数を抑えて DB 側のリソース競合を避けること。", "severity": "warning", "description": "", "enabled": true},
+    {"key": "N-002", "kind": "nl", "target": "app.server_count", "expression": null, "nl_text": "AP サーバーは 1 台停止しても残りでピークを処理できる台数にすること。", "severity": "warning", "description": "", "enabled": true}
+  ],
+  "relations": [
+    {"from": "nfr.target_response_sec", "to": "app.server_count", "note": "応答時間目標を満たす台数の検討"}
+  ]
+}

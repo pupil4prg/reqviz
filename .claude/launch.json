@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "reqviz",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--no-dev", "python", "-m", "reqviz"],
+      "port": 8765
+    }
+  ]
+}

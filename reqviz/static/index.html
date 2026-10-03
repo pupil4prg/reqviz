@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>要件パラメータ可視化</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a73e8'/%3E%3Ccircle cx='9' cy='10' r='3.5' fill='white'/%3E%3Ccircle cx='23' cy='10' r='3.5' fill='white'/%3E%3Ccircle cx='16' cy='23' r='3.5' fill='white'/%3E%3Cpath d='M9 10L16 23M23 10L16 23' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">要件パラメータ可視化</a>
+    <nav id="system-nav" class="system-nav"></nav>
+    <div class="topbar-right">
+      <a href="#/settings" class="link-muted">設定</a>
+      <span id="user-badge" class="user-badge" title="操作者（設定で変更）"></span>
+    </div>
+  </header>
+  <main id="app"></main>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
