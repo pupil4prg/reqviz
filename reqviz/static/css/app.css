@@ -201,3 +201,12 @@ table.tbl { width: 100%; border-collapse: collapse; background: var(--surface); 
 label.field { min-width: 0; }
 label.field > input, label.field > select, label.field > textarea { width: 100%; min-width: 0; }
 .row > label.field { flex: 1; }
+
+/* 構成項目 */
+pre.doc { background: var(--surface-2); border-radius: 6px; padding: 10px 12px; margin: 6px 0 0; max-height: 320px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; font-size: 12.5px; }
+tr.selected-option td { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+.options-edit td { vertical-align: top; }
+.options-edit textarea { min-height: 54px; min-width: 150px; font-size: 12.5px; }
+.options-edit input[type=radio] { width: auto; }
+textarea.mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 12.5px; }

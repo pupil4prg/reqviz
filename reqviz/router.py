@@ -34,6 +34,7 @@ class Response:
     content_type: str = "application/json; charset=utf-8"
     status: int = 200
     filename: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 Handler = Callable[[Request], Any]
@@ -44,6 +45,7 @@ _PARAM_RE = re.compile(r"\{(\w+)(?::(int|str))?\}")
 class Router:
     def __init__(self) -> None:
         self.routes: list[tuple[str, re.Pattern[str], dict[str, str], Handler]] = []
+        self.patterns: list[tuple[str, str, Handler]] = []
 
     def add(self, method: str, pattern: str, handler: Handler) -> None:
         types: dict[str, str] = {}
@@ -54,6 +56,15 @@ class Router:
 
         regex = re.compile("^" + _PARAM_RE.sub(repl, pattern) + "$")
         self.routes.append((method.upper(), regex, types, handler))
+        self.patterns.append((method.upper(), pattern, handler))
+
+    def catalog(self) -> list[dict[str, str]]:
+        """登録済みのルート一覧（メソッド・パス・説明）。"""
+        out = []
+        for method, pattern, handler in self.patterns:
+            doc = (handler.__doc__ or "").strip().splitlines()
+            out.append({"method": method, "path": _PARAM_RE.sub(r"{\1}", pattern), "summary": doc[0] if doc else handler.__name__})
+        return out
 
     def route(self, method: str, pattern: str) -> Callable[[Handler], Handler]:
         def deco(fn: Handler) -> Handler:

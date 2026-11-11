@@ -1,6 +1,6 @@
 # システム要件可視化ツール 実装計画（v1.0）
 
-対象の要件: [requirements.md](requirements.md) v0.2
+対象の要件: [requirements.md](requirements.md) v0.2（MVP の計画。v0.3 で追加した構成項目・MCP・A2A・履歴管理の構成は [agent-integration.md](agent-integration.md) と README を参照）
 
 ## 1. 技術スタック
 

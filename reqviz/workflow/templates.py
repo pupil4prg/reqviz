@@ -40,6 +40,8 @@ def _strip_status(payload: dict[str, Any]) -> dict[str, Any]:
     for x in p.get("params", []):
         x.pop("status", None)
         x.pop("ai_skipped", None)
+    for x in p.get("items", []):
+        x.pop("status", None)
     return p
 
 

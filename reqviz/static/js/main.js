@@ -5,6 +5,7 @@ import { clear, h, showError, fill } from "./ui.js";
 import * as systemsView from "./views/systems.js";
 import * as graphView from "./views/graph-view.js";
 import * as paramsView from "./views/params.js";
+import * as itemsView from "./views/items.js";
 import * as rulesView from "./views/rules.js";
 import * as layersView from "./views/layers.js";
 import * as approvalsView from "./views/approvals.js";
@@ -16,6 +17,7 @@ import * as settingsView from "./views/settings.js";
 const SYSTEM_TABS = [
   ["graph", "関連図", graphView],
   ["params", "パラメータ", paramsView],
+  ["items", "構成項目", itemsView],
   ["rules", "ルール", rulesView],
   ["layers", "レイヤー", layersView],
   ["approvals", "承認", approvalsView],
@@ -46,7 +48,7 @@ export async function refreshNav(sid) {
     if (parts[0] !== "s" || Number(parts[1]) !== sid) return;
     const active = parts[2] || "graph";
     app.system = system;
-    const pending = queue.params.length + queue.baselines.length + queue.upstream_changed.length;
+    const pending = queue.params.length + queue.items.length + queue.baselines.length + queue.upstream_changed.length;
     fill(nav, 
       h("span", { class: "sys-name", title: system.name }, system.name),
       SYSTEM_TABS.map(([key, label]) => h("a", { href: `#/s/${sid}/${key}`, class: key === active ? "active" : "" },

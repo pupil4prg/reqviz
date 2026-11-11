@@ -2,7 +2,7 @@
 
 import { api } from "../api.js";
 import { refreshNav } from "../main.js";
-import { fmtTime, fmtValue, h, promptComment, showError, toast, fill } from "../ui.js";
+import { fmtAny, fmtTime, fmtValue, h, promptComment, showError, toast, fill } from "../ui.js";
 
 export async function render(root, { sid }) {
   const page = h("div", { class: "page" });
@@ -16,6 +16,19 @@ export async function render(root, { sid }) {
     }
     try {
       await api.post(`/api/params/${p.id}/transition`, { action, comment, row_version: p.row_version });
+      toast(`${label}しました`);
+      load();
+    } catch (e) { showError(e); }
+  }
+
+  async function actItem(i, action, label, needComment) {
+    let comment = "";
+    if (needComment) {
+      comment = await promptComment({ title: `${label}: ${i.ref}`, required: true, okLabel: label, danger: true });
+      if (comment === null) return;
+    }
+    try {
+      await api.post(`/api/items/${i.id}/transition`, { action, comment, row_version: i.row_version });
       toast(`${label}しました`);
       load();
     } catch (e) { showError(e); }
@@ -50,6 +63,22 @@ export async function render(root, { sid }) {
               h("button", { class: "small primary", onclick: () => act(p, "approve", "承認", false) }, "承認"),
               h("button", { class: "small danger", onclick: () => act(p, "reject", "差し戻し", true) }, "差し戻し"))))))
         : h("p", { class: "muted" }, "レビュー中のパラメータはありません"),
+
+      h("h2", {}, `レビュー中の構成項目（${q.items.length}）`),
+      q.items.length
+        ? h("table", { class: "tbl" },
+          h("tr", {}, ["構成項目", "種別", "内容", "根拠", ""].map((x) => h("th", {}, x))),
+          q.items.map((i) => h("tr", {},
+            h("td", {}, h("a", { href: `#/s/${sid}/items` }, i.name), h("div", { class: "mono small muted" }, i.ref)),
+            h("td", {}, i.kind === "choice" ? "選択肢" : "不定形データ"),
+            h("td", { class: "small" }, i.kind === "choice"
+              ? ["採用: ", h("b", {}, (i.options.find((o) => o.key === i.selected) || {}).label || i.selected), `（候補 ${i.options.length} 件）`]
+              : fmtAny(i.content, 120)),
+            h("td", { class: "small" }, i.rationale),
+            h("td", {}, h("div", { class: "row" },
+              h("button", { class: "small primary", onclick: () => actItem(i, "approve", "承認", false) }, "承認"),
+              h("button", { class: "small danger", onclick: () => actItem(i, "reject", "差し戻し", true) }, "差し戻し"))))))
+        : h("p", { class: "muted" }, "レビュー中の構成項目はありません"),
 
       h("h2", {}, `承認後に上流が変更されたもの（${q.upstream_changed.length}）`),
       q.upstream_changed.length

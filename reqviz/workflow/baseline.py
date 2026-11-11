@@ -43,6 +43,9 @@ def readiness(ctx: Ctx, system_id: int) -> dict[str, Any]:
     not_approved = [p["ref"] for p in params if p["status"] != "approved"]
     if not_approved:
         blockers.append(f"未承認のパラメータが {len(not_approved)} 件あります: {', '.join(not_approved[:10])}")
+    items_open = [i["ref"] for i in repo.list_items(ctx, system_id) if i["status"] != "approved"]
+    if items_open:
+        blockers.append(f"未承認の構成項目が {len(items_open)} 件あります: {', '.join(items_open[:10])}")
     stale = [p["ref"] for p in params if p["flag_stale"]]
     if stale:
         blockers.append(f"要再計算のパラメータがあります: {', '.join(stale[:10])}")

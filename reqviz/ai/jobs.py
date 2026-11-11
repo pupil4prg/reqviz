@@ -81,6 +81,14 @@ def build_context(ctx: Ctx, system_id: int) -> dict[str, Any]:
             }
             for n in g["nodes"]
         ],
+        "choices": [
+            {
+                "ref": i["ref"], "name": i["name"], "selected": i["selected"],
+                "options": [{"key": o["key"], "label": o["label"], "description": o["description"] or None} for o in i["options"]],
+                "rationale": i["rationale"] or None, "status": i["status"],
+            }
+            for i in repo.list_items(ctx, system_id, "choice")
+        ],
         "rules": [
             {k: r[k] for k in ("key", "kind", "target", "expression", "nl_text", "severity", "description") if r.get(k)}
             for r in repo.list_rules(ctx, system_id)

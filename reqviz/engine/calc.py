@@ -59,6 +59,7 @@ def validate_rules(params: Iterable[Param], rules: Iterable[Rule]) -> dict[str, 
     params = list(params)
     rules = list(rules)
     known = {p.ref for p in params}
+    readonly = {p.ref for p in params if not p.assignable}
     errors: dict[str, list[str]] = {}
 
     def add(key: str, msg: str) -> None:
@@ -80,6 +81,8 @@ def validate_rules(params: Iterable[Param], rules: Iterable[Rule]) -> dict[str, 
                 add(r.key, "算出式には代入先パラメータが必要です")
             elif r.target not in known:
                 add(r.key, f"代入先が存在しません: {r.target}")
+            elif r.target in readonly:
+                add(r.key, f"代入先にできるのはパラメータだけです（{r.target} は構成項目）")
             elif r.enabled:
                 if r.target in targets:
                     add(r.key, f"代入先 {r.target} には既に算出式 {targets[r.target]} があります")
@@ -118,7 +121,7 @@ def recalc(
     """
     params = list(params)
     by_ref = {p.ref: p for p in params}
-    frules = {r.target: r for r in formula_rules(rules) if r.target in by_ref}
+    frules = {r.target: r for r in formula_rules(rules) if r.target in by_ref and by_ref[r.target].assignable}
     edges = formula_edges(frules.values())
     order = topo_sort(sorted(by_ref), edges)  # 循環時は CycleError
 

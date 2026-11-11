@@ -75,6 +75,36 @@ def chat(
     raise last or LLMError("不明なエラー")
 
 
+def chat_tools(
+    cfg: LLMConfig,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    opener: Opener = urllib.request.urlopen,
+) -> dict[str, Any]:
+    """ツール呼び出し（function calling）つきで送り、応答の message オブジェクトを返す。
+
+    返り値は ``{"role": "assistant", "content": str | None, "tool_calls": [...]}`` の形（OpenAI 互換）。
+    """
+    if not cfg.enabled:
+        raise LLMError("LLM の接続先が設定されていません（REQVIZ_LLM_BASE_URL / REQVIZ_LLM_MODEL）")
+    body: dict[str, Any] = {"model": cfg.model, "messages": messages, "temperature": 0.2}
+    if tools:
+        body["tools"] = tools
+    try:
+        raw = _post(cfg, body, opener)
+        message = raw["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise LLMError("応答の形式が不正です")
+        return message
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:500] if e.fp else ""
+        raise LLMError(f"HTTP {e.code}: {detail}") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise LLMError(f"接続できません: {e}") from None
+    except (KeyError, IndexError, ValueError) as e:
+        raise LLMError(f"応答の形式が不正です: {e}") from None
+
+
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 

@@ -17,6 +17,7 @@ class Param:
     value: Any = None
     enum_options: list[str] = field(default_factory=list)
     status: str = "draft"
+    assignable: bool = True  # False なら算出式の代入先にできない（選択肢項目など）
 
 
 @dataclass

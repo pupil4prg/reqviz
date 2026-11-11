@@ -94,4 +94,5 @@ def approval_queue(ctx: Ctx, system_id: int) -> dict[str, Any]:
             (system_id,),
         )
     ]
-    return {"params": in_review, "upstream_changed": upstream, "baselines": baselines}
+    items = [i for i in repo.list_items(ctx, system_id) if i["status"] == "in_review"]
+    return {"params": in_review, "items": items, "upstream_changed": upstream, "baselines": baselines}
