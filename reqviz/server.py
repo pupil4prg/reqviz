@@ -13,16 +13,20 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from . import db
+from . import __version__, db
+from .a2a.server import A2AServer, agent_card
+from .agent.tools import InProcessClient
 from .ai import jobs
 from .api.routes import content_disposition, router
 from .config import Config, LLMConfig
 from .context import Ctx
 from .errors import AppError, BadRequest
 from .router import Request, Response
+from .mcp.protocol import PARSE_ERROR, McpServer, error_response
 from .workflow import templates
 
 STATIC_DIR = Path(__file__).parent / "static"
+AGENT_CARD_PATH = "/.well-known/agent-card.json"
 MAX_BODY = 10 * 1024 * 1024
 log = logging.getLogger("reqviz")
 
@@ -38,9 +42,17 @@ CONTENT_TYPES = {
 
 
 class App:
+    version = __version__
+
     def __init__(self, config: Config, run_ai_in_thread: bool = True):
         self.config = config
         self.run_ai_in_thread = run_ai_in_thread
+        client = InProcessClient(self)
+        self.mcp = McpServer(client, __version__)
+        self.a2a = A2AServer(
+            config.db_path, client, lambda ctx: jobs.effective_llm_config(ctx, config.llm), __version__,
+            run_in_thread=run_ai_in_thread,
+        )
         conn = db.connect(config.db_path)
         try:
             db.migrate(conn)
@@ -56,7 +68,9 @@ class App:
     def handle(self, method: str, raw_path: str, headers: Any, body: bytes) -> Response:
         parts = urlsplit(raw_path)
         path = unquote(parts.path)
-        if not path.startswith("/api/"):
+        if self.config.agent_endpoints and path in ("/mcp", "/a2a", AGENT_CARD_PATH):
+            return self.agent_endpoint(method, path, headers, body, dict(parse_qsl(parts.query)))
+        if path != "/api" and not path.startswith("/api/"):
             return self.static(path) if method in ("GET", "HEAD") else self.error(HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "許可されていないメソッドです")
 
         m = router.match(method, path)
@@ -91,6 +105,48 @@ class App:
         finally:
             conn.close()
 
+    # ------------------------------------------------------------ MCP / A2A
+
+    def _actor(self, headers: Any, fallback: str) -> str:
+        return unquote((headers.get("X-Reqviz-User") or "").strip())[:64] or fallback
+
+    def _origin_allowed(self, headers: Any) -> bool:
+        """DNS リバインディング対策。Origin があるときは、自分自身か許可リストのものだけを通す。"""
+        origin = (headers.get("Origin") or "").strip().rstrip("/")
+        if not origin:
+            return True
+        if origin in self.config.allowed_origins:
+            return True
+        host = (headers.get("Host") or "").strip()
+        return bool(host) and urlsplit(origin).netloc == host
+
+    def base_url(self, headers: Any) -> str:
+        if self.config.public_url:
+            return self.config.public_url
+        host = (headers.get("Host") or "").strip() or f"{self.config.host}:{self.config.port}"
+        return f"http://{host}"
+
+    def agent_endpoint(self, method: str, path: str, headers: Any, body: bytes, query: dict[str, str]) -> Response:
+        def as_json(obj: Any, status: int = 200) -> Response:
+            return Response(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"), status=status)
+
+        if path == AGENT_CARD_PATH:
+            if method not in ("GET", "HEAD"):
+                return Response(b"", status=405, headers={"Allow": "GET"})
+            return as_json(agent_card(self.base_url(headers), __version__))
+        if not self._origin_allowed(headers):
+            return as_json(error_response(None, -32600, "Forbidden: Origin is not allowed"), 403)
+        if method != "POST":
+            return Response(b"", status=405, headers={"Allow": "POST"})
+        if path == "/a2a":
+            return as_json(self.a2a.handle(body, headers, query, self._actor(headers, "a2a")))
+        try:
+            msg = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return as_json(error_response(None, PARSE_ERROR, "Parse error"), 400)
+        status, res = self.mcp.handle(msg, headers, self._actor(headers, "mcp"))
+        return Response(b"", status=status) if res is None else as_json(res, status)
+
     def static(self, path: str) -> Response:
         if path in ("", "/"):
             path = "/index.html"
@@ -107,7 +163,7 @@ class App:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "reqviz/0.1"
+    server_version = f"reqviz/{__version__}"
     app: App  # make_server で設定
 
     def _dispatch(self) -> None:
@@ -124,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         if res.filename:
             self.send_header("Content-Disposition", content_disposition(res.filename))
+        for k, v in res.headers.items():
+            self.send_header(k, v)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(res.body)

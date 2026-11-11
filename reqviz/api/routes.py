@@ -13,7 +13,8 @@ from ..io import export
 from ..repo import history
 from ..repo import model as repo
 from ..router import Request, Response, Router
-from ..workflow import analysis, baseline, editing, param_state, snapshot, templates
+from ..errors import NotFound
+from ..workflow import analysis, baseline, editing, items, param_state, snapshot, templates, versions
 
 router = Router()
 r = router.route
@@ -43,11 +44,25 @@ def _json_bytes(obj: Any) -> bytes:
 
 # ---------------------------------------------------------------- メタ
 
+@r("GET", "/api")
+def api_catalog(req: Request) -> Any:
+    """API の一覧（メソッド・パス・説明）と、エージェント向けエンドポイント"""
+    return {
+        "name": "reqviz",
+        "version": req.app.version,
+        "routes": router.catalog(),
+        "agent_endpoints": {"mcp": "/mcp", "a2a": "/a2a", "a2a_agent_card": "/.well-known/agent-card.json"},
+    }
+
+
 @r("GET", "/api/meta")
 def meta(req: Request) -> Any:
     return {
         "user": req.ctx.actor,
+        "version": req.app.version,
         "status_labels": param_state.STATUS_LABELS,
+        "item_status_labels": items.STATUS_LABELS,
+        "item_kinds": items.KIND_LABELS,
         "ai_purposes": PURPOSE_LABELS,
         "llm": jobs.get_settings(req.ctx, req.app.config.llm),
     }
@@ -106,6 +121,11 @@ def layers_reorder(req: Request) -> Any:
     return editing.reorder_layers(req.ctx, req.params["sid"], _int_list(req.json().get("layer_ids"), "layer_ids"))
 
 
+@r("GET", "/api/layers/{id:int}")
+def layers_get(req: Request) -> Any:
+    return repo.get_layer(req.ctx, req.params["id"])
+
+
 @r("PUT", "/api/layers/{id:int}")
 def layers_update(req: Request) -> Any:
     return editing.update_layer(req.ctx, req.params["id"], req.json())
@@ -129,9 +149,21 @@ def params_create(req: Request) -> Any:
     return editing.create_param(req.ctx, req.params["sid"], req.json())
 
 
+@r("GET", "/api/systems/{sid:int}/params/by-ref/{ref}")
+def params_get_by_ref(req: Request) -> Any:
+    """参照名（layer.key）でパラメータを取得する"""
+    p = repo.params_by_ref(req.ctx, req.params["sid"]).get(req.params["ref"])
+    if p is None:
+        raise NotFound(f"パラメータが見つかりません: {req.params['ref']}")
+    return _param_detail(req, p)
+
+
 @r("GET", "/api/params/{id:int}")
 def params_get(req: Request) -> Any:
-    p = repo.get_param(req.ctx, req.params["id"])
+    return _param_detail(req, repo.get_param(req.ctx, req.params["id"]))
+
+
+def _param_detail(req: Request, p: dict[str, Any]) -> Any:
     p["revisions"] = history.list_revisions(req.ctx, p["system_id"], "param", p["ref"], limit=50)
     p["audit"] = history.list_audit(req.ctx, p["system_id"], p["ref"], limit=50)
     p["review_blockers"] = param_state.review_blockers(req.ctx, p)
@@ -169,6 +201,63 @@ def params_bulk_transition(req: Request) -> Any:
     return {"ok": ok, "failed": failed}
 
 
+# ---------------------------------------------------------------- 構成項目（選択肢・不定形データ）
+
+@r("GET", "/api/systems/{sid:int}/items")
+def items_list(req: Request) -> Any:
+    """構成項目の一覧（kind=choice|document で絞り込み）"""
+    return repo.list_items(req.ctx, req.params["sid"], req.query.get("kind") or None)
+
+
+@r("POST", "/api/systems/{sid:int}/items")
+def items_create(req: Request) -> Any:
+    """構成項目を作成する（kind: choice は options/selected、document は content_type/content）"""
+    data = req.json()
+    return items.create_item(req.ctx, req.params["sid"], data, comment=data.get("comment") or "")
+
+
+@r("GET", "/api/systems/{sid:int}/items/by-ref/{ref}")
+def items_get_by_ref(req: Request) -> Any:
+    """参照名（layer.key）で構成項目を取得する"""
+    i = repo.items_by_ref(req.ctx, req.params["sid"]).get(req.params["ref"])
+    if i is None:
+        raise NotFound(f"構成項目が見つかりません: {req.params['ref']}")
+    return _item_detail(req, i)
+
+
+@r("GET", "/api/items/{id:int}")
+def items_get(req: Request) -> Any:
+    """構成項目の詳細（変更履歴・監査ログつき）"""
+    return _item_detail(req, repo.get_item(req.ctx, req.params["id"]))
+
+
+def _item_detail(req: Request, i: dict[str, Any]) -> Any:
+    i["revisions"] = versions.timeline(req.ctx, i["system_id"], "item", i["ref"])[:50]
+    i["audit"] = history.list_audit(req.ctx, i["system_id"], i["ref"], limit=50)
+    i["review_blockers"] = items.review_blockers(i)
+    return i
+
+
+@r("PUT", "/api/items/{id:int}")
+def items_update(req: Request) -> Any:
+    """構成項目を更新する（内容を変えると下書きに戻る）"""
+    data = req.json()
+    return items.update_item(req.ctx, req.params["id"], data, comment=data.get("comment") or "")
+
+
+@r("DELETE", "/api/items/{id:int}")
+def items_delete(req: Request) -> Any:
+    items.delete_item(req.ctx, req.params["id"])
+    return {"ok": True}
+
+
+@r("POST", "/api/items/{id:int}/transition")
+def items_transition(req: Request) -> Any:
+    """構成項目の状態遷移（request_review / approve / reject / withdraw）"""
+    data = req.json()
+    return items.transition(req.ctx, req.params["id"], data.get("action") or "", data.get("comment") or "", data.get("row_version"))
+
+
 # ---------------------------------------------------------------- 関連
 
 @r("GET", "/api/systems/{sid:int}/relations")
@@ -179,6 +268,17 @@ def relations_list(req: Request) -> Any:
 @r("POST", "/api/systems/{sid:int}/relations")
 def relations_create(req: Request) -> Any:
     return editing.create_relation(req.ctx, req.params["sid"], req.json())
+
+
+@r("GET", "/api/relations/{id:int}")
+def relations_get(req: Request) -> Any:
+    return editing.get_relation(req.ctx, req.params["id"])
+
+
+@r("PUT", "/api/relations/{id:int}")
+def relations_update(req: Request) -> Any:
+    """関連のメモを更新する"""
+    return editing.update_relation(req.ctx, req.params["id"], req.json())
 
 
 @r("DELETE", "/api/relations/{id:int}")
@@ -210,6 +310,14 @@ def rules_validate(req: Request) -> Any:
     except Invalid as e:
         errors = [e.message]
     return {"ok": not errors, "errors": errors}
+
+
+@r("GET", "/api/rules/{id:int}")
+def rules_get(req: Request) -> Any:
+    """ルールの詳細（変更履歴つき）"""
+    x = repo.get_rule(req.ctx, req.params["id"])
+    x["revisions"] = versions.timeline(req.ctx, x["system_id"], "rule", x["key"])[:50]
+    return x
 
 
 @r("PUT", "/api/rules/{id:int}")
@@ -306,6 +414,42 @@ def revisions(req: Request) -> Any:
 @r("GET", "/api/systems/{sid:int}/audit")
 def audit(req: Request) -> Any:
     return history.list_audit(req.ctx, req.params["sid"], req.query.get("key"), int(req.query.get("limit", 200)))
+
+
+@r("GET", "/api/audit")
+def audit_all(req: Request) -> Any:
+    """全体の監査ログ（システムの削除・テンプレート・設定の操作を含む）"""
+    return history.list_audit(req.ctx, None, req.query.get("key"), int(req.query.get("limit", 200)))
+
+
+@r("GET", "/api/revisions/{id:int}")
+def revision_get(req: Request) -> Any:
+    """リビジョン 1 件（変更前後の内容と差分）"""
+    return history.get_revision(req.ctx, req.params["id"])
+
+
+@r("POST", "/api/revisions/{id:int}/restore")
+def revision_restore(req: Request) -> Any:
+    """パラメータ・構成項目・ルールを、指定リビジョン直後の内容に戻す"""
+    return versions.restore_revision(req.ctx, req.params["id"], req.json().get("comment") or "")
+
+
+@r("GET", "/api/systems/{sid:int}/history/timeline")
+def history_timeline(req: Request) -> Any:
+    """1 エンティティの版の系列（entity=param|item|rule, key=参照名またはルールキー）"""
+    return versions.timeline(req.ctx, req.params["sid"], req.query.get("entity") or "", req.query.get("key") or "")
+
+
+@r("GET", "/api/systems/{sid:int}/history/state")
+def history_state(req: Request) -> Any:
+    """指定時点の内容を再現する（at=ISO 8601 の日時 または rev:<リビジョンID>）"""
+    return versions.state_at(req.ctx, req.params["sid"], req.query.get("at"))
+
+
+@r("GET", "/api/systems/{sid:int}/history/diff")
+def history_diff(req: Request) -> Any:
+    """2 時点間の差分（from / to = ISO 8601 の日時 または rev:<ID>。to 省略時は現在）"""
+    return versions.diff(req.ctx, req.params["sid"], req.query.get("from"), req.query.get("to"))
 
 
 # ---------------------------------------------------------------- AI
@@ -417,6 +561,42 @@ def import_system(req: Request) -> Any:
     templates._mark_formula_targets_stale(req.ctx, sid)
     history.audit(req.ctx, sid, "system.import", "system", None)
     return {"ok": True}
+
+
+# API 一覧（GET /api）に出す説明。docstring を持たないハンドラの分をここで補う
+_SUMMARIES = {
+    "meta": "操作者・ラベル類・LLM 設定などの画面用メタ情報",
+    "systems_list": "システムの一覧", "systems_create": "システムを作成する（template_id 指定でテンプレートから）",
+    "systems_get": "システム 1 件", "systems_update": "システムの名前・説明を更新する", "systems_delete": "システムを削除する",
+    "systems_clone": "システムを複製する",
+    "layers_list": "レイヤーの一覧", "layers_create": "レイヤーを追加する", "layers_reorder": "レイヤーを並べ替える（layer_ids）",
+    "layers_get": "レイヤー 1 件", "layers_update": "レイヤーのキー・名前を更新する", "layers_delete": "空のレイヤーを削除する",
+    "params_list": "パラメータの一覧", "params_create": "パラメータを作成する", "params_get": "パラメータの詳細（履歴・監査ログつき）",
+    "params_update": "パラメータを更新する（値を変えると下書きに戻り、下流に要再計算が付く）", "params_delete": "パラメータを削除する",
+    "params_transition": "パラメータの状態遷移（skip_ai / request_review / approve / reject / withdraw / ack_upstream）",
+    "items_delete": "構成項目を削除する",
+    "relations_list": "手動の関連の一覧", "relations_create": "関連を登録する（from_ref, to_ref, note）",
+    "relations_get": "関連 1 件", "relations_delete": "関連を削除する",
+    "rules_list": "ルールの一覧（検証エラーつき）", "rules_create": "ルールを作成する", "rules_validate": "ルール案を保存せずに検証する",
+    "rules_update": "ルールを更新する", "rules_delete": "ルールを削除する",
+    "graph": "関連図のデータ（ノード・エッジ・違反・座標）", "violations": "制約違反の一覧",
+    "recalc": "再計算案を作成する（mode: stale / downstream / all）", "apply_proposals": "再計算案を値に反映する",
+    "approvals": "承認待ちの一覧（パラメータ・構成項目・版）",
+    "baselines_list": "版の一覧と、作成できるかの判定", "baselines_create": "版を作成してレビューに出す", "baselines_get": "版 1 件（凍結内容つき）",
+    "baselines_approve": "版を承認する", "baselines_reject": "版を差し戻す", "baselines_restore": "作業中の状態を版の内容で置き換える",
+    "diff": "版同士、または版と作業中の差分（from / to = working / current / 版 ID）",
+    "revisions": "変更履歴（entity, key, limit で絞り込み）", "audit": "システムの監査ログ",
+    "ai_start": "AI ジョブを開始する（evaluate / suggest_values / suggest_rules / rationale）", "ai_runs": "AI ジョブの一覧",
+    "ai_run": "AI ジョブ 1 件（提案つき）", "ai_adopt": "AI の提案を採用する", "ai_reject": "AI の提案を不採用にする",
+    "llm_get": "LLM の接続設定", "llm_put": "LLM の接続設定を更新する",
+    "templates_list": "テンプレートの一覧", "templates_create": "テンプレートを作成する（system_id または payload）",
+    "templates_get": "テンプレート 1 件", "templates_delete": "テンプレートを削除する", "templates_export": "テンプレートを JSON で書き出す",
+    "export_system": "システムを書き出す（format = json / rules-json / csv / html）",
+    "import_system": "JSON を取り込む（reqviz/system は置き換え、reqviz/rules は追加・更新）",
+}
+for _name, _doc in _SUMMARIES.items():
+    if not globals()[_name].__doc__:
+        globals()[_name].__doc__ = _doc
 
 
 def content_disposition(filename: str) -> str:

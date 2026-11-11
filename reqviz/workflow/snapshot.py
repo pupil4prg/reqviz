@@ -10,7 +10,7 @@ from ..engine import calc
 from ..errors import Invalid
 from ..repo import history
 from ..repo import model as repo
-from . import editing
+from . import editing, items as items_wf
 
 FORMAT = "reqviz/system"
 RULES_FORMAT = "reqviz/rules"
@@ -18,6 +18,11 @@ FORMAT_VERSION = 1
 
 PARAM_FIELDS = ("layer", "key", "name", "type", "enum_options", "value", "unit", "source", "rationale", "ref_doc", "owner")
 RULE_FIELDS = ("key", "kind", "target", "expression", "nl_text", "severity", "description", "enabled")
+ITEM_FIELDS = (
+    "layer", "key", "name", "kind", "options", "selected", "content_type", "content",
+    "tags", "rationale", "ref_doc", "owner",
+)
+SECTIONS = ("layers", "params", "items", "rules", "relations")
 
 
 def _rule_out(r: dict[str, Any]) -> dict[str, Any]:
@@ -38,12 +43,20 @@ def export_payload(ctx: Ctx, system_id: int, include_status: bool = True) -> dic
             d["status"] = p["status"]
             d["ai_skipped"] = p["ai_skipped"]
         out_params.append(d)
+    out_items = []
+    for i in sorted(repo.list_items(ctx, system_id), key=lambda x: x["ref"]):
+        d = {k: i.get(k) for k in ITEM_FIELDS if k != "layer"}
+        d["layer"] = i["layer_key"]
+        if include_status:
+            d["status"] = i["status"]
+        out_items.append(d)
     return {
         "format": FORMAT,
         "format_version": FORMAT_VERSION,
         "system": {"name": system["name"], "description": system["description"]},
         "layers": [{"key": l["key"], "name": l["name"], "sort_order": i} for i, l in enumerate(layers)],
         "params": out_params,
+        "items": out_items,
         "rules": [_rule_out(r) for r in repo.list_rules(ctx, system_id)],
         "relations": sorted(
             ({"from": r["from_ref"], "to": r["to_ref"], "note": r["note"]} for r in repo.list_relations(ctx, system_id)),
@@ -72,7 +85,8 @@ def replace_with_payload(ctx: Ctx, system_id: int, payload: dict[str, Any], keep
     _require_format(payload, FORMAT)
     with transaction(ctx.conn):
         old = export_payload(ctx, system_id)
-        for t in ("relations", "rules", "params", "layers"):
+        old_state = entity_state(ctx, system_id)
+        for t in ("relations", "rules", "params", "items", "layers"):
             ctx.conn.execute(f"DELETE FROM {t} WHERE system_id = ?", (system_id,))
 
         layer_ids: dict[str, int] = {}
@@ -110,6 +124,27 @@ def replace_with_payload(ctx: Ctx, system_id: int, payload: dict[str, Any], keep
             )
             param_ids[ref] = cur.lastrowid
 
+        item_refs: set[str] = set()
+        for it in payload.get("items", []):
+            layer = it.get("layer")
+            if layer not in layer_ids:
+                raise Invalid(f"構成項目 {it.get('key')} のレイヤー {layer} がありません")
+            data = {k: it.get(k) for k in ITEM_FIELDS if k != "layer"}
+            data["layer_id"] = layer_ids[layer]
+            fields = items_wf._item_fields(ctx, system_id, data, None)
+            ref = f"{layer}.{fields['key']}"
+            if ref in param_ids or ref in item_refs:
+                raise Invalid(f"参照名が重複しています: {ref}")
+            item_refs.add(ref)
+            status = it.get("status", "draft") if keep_status else "draft"
+            if status not in ("draft", "in_review", "approved"):
+                raise Invalid(f"状態が不正です: {status}")
+            fields.update(system_id=system_id, status=status, updated_at=now())
+            cols = ", ".join(fields)
+            ctx.conn.execute(
+                f"INSERT INTO items ({cols}) VALUES ({', '.join('?' * len(fields))})", list(fields.values())
+            )
+
         for r in payload.get("rules", []):
             fields = editing._rule_fields(r, None)
             fields["system_id"] = system_id
@@ -135,12 +170,38 @@ def replace_with_payload(ctx: Ctx, system_id: int, payload: dict[str, Any], keep
         if errs:
             raise Invalid("ルールに誤りがあるため取り込めません", {"rule_errors": errs})
 
+        _record_entity_revisions(ctx, system_id, old_state, entity_state(ctx, system_id), op, comment)
         history.add_revision(ctx, system_id, "system", "*", op, before=_summary(old), after=_summary(payload), comment=comment)
         ctx.conn.execute("UPDATE systems SET updated_at = ? WHERE id = ?", (now(), system_id))
 
 
 def _summary(payload: dict[str, Any]) -> dict[str, Any]:
-    return {k: len(payload.get(k, [])) for k in ("layers", "params", "rules", "relations")}
+    return {k: len(payload.get(k, [])) for k in SECTIONS}
+
+
+def entity_state(ctx: Ctx, system_id: int) -> dict[str, dict[str, dict[str, Any]]]:
+    """履歴の対象エンティティ（param / item / rule）の現在のスナップショット。"""
+    return {
+        "param": {p["ref"]: editing.param_snapshot(p) for p in repo.list_params(ctx, system_id)},
+        "item": {i["ref"]: items_wf.item_snapshot(i) for i in repo.list_items(ctx, system_id)},
+        "rule": {r["key"]: editing.rule_snapshot(r) for r in repo.list_rules(ctx, system_id)},
+    }
+
+
+def _record_entity_revisions(
+    ctx: Ctx, system_id: int, old: dict[str, dict[str, Any]], new: dict[str, dict[str, Any]], op: str, comment: str
+) -> None:
+    """一括置き換え（取り込み・復元・テンプレートからの作成）を、エンティティ単位の履歴にも残す。"""
+    for entity in ("param", "item", "rule"):
+        for key in sorted(set(old[entity]) | set(new[entity])):
+            before, after = old[entity].get(key), new[entity].get(key)
+            if before == after:
+                continue
+            if op == "restore":
+                rev_op = "restore"
+            else:
+                rev_op = "create" if before is None else "delete" if after is None else "update"
+            history.add_revision(ctx, system_id, entity, key, rev_op, before=before, after=after, comment=comment)
 
 
 def import_rules(ctx: Ctx, system_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -173,6 +234,7 @@ def diff_payloads(a: dict[str, Any], b: dict[str, Any]) -> dict[str, list[dict[s
     specs = {
         "layers": lambda x: x["key"],
         "params": lambda x: f"{x['layer']}.{x['key']}",
+        "items": lambda x: f"{x['layer']}.{x['key']}",
         "rules": lambda x: x["key"],
         "relations": lambda x: f"{x['from']}->{x['to']}",
     }

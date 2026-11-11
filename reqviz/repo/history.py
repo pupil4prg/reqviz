@@ -6,6 +6,7 @@ from typing import Any
 
 from ..context import Ctx
 from ..db import dumps, loads, now
+from ..errors import NotFound
 
 
 def add_revision(
@@ -48,14 +49,22 @@ def list_revisions(
         args.append(entity_key)
     sql += " ORDER BY id DESC LIMIT ?"
     args.append(limit)
-    out = []
-    for r in ctx.conn.execute(sql, args):
-        d = dict(r)
-        d["before"] = loads(d.pop("before_json"))
-        d["after"] = loads(d.pop("after_json"))
-        d["changes"] = diff_fields(d["before"], d["after"])
-        out.append(d)
-    return out
+    return [revision_dict(r) for r in ctx.conn.execute(sql, args)]
+
+
+def revision_dict(r: Any) -> dict[str, Any]:
+    d = dict(r)
+    d["before"] = loads(d.pop("before_json"))
+    d["after"] = loads(d.pop("after_json"))
+    d["changes"] = diff_fields(d["before"], d["after"])
+    return d
+
+
+def get_revision(ctx: Ctx, revision_id: int) -> dict[str, Any]:
+    r = ctx.conn.execute("SELECT * FROM revisions WHERE id = ?", (revision_id,)).fetchone()
+    if r is None:
+        raise NotFound(f"リビジョンが見つかりません: {revision_id}")
+    return revision_dict(r)
 
 
 def diff_fields(before: Any, after: Any) -> list[dict[str, Any]]:
@@ -95,9 +104,13 @@ def audit(
     )
 
 
-def list_audit(ctx: Ctx, system_id: int, target_key: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM audit_log WHERE system_id = ?"
-    args: list[Any] = [system_id]
+def list_audit(ctx: Ctx, system_id: int | None, target_key: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    """監査ログ。system_id が None なら全体（システム削除・テンプレート・設定の操作を含む）。"""
+    sql = "SELECT * FROM audit_log WHERE 1 = 1"
+    args: list[Any] = []
+    if system_id is not None:
+        sql += " AND system_id = ?"
+        args.append(system_id)
     if target_key:
         sql += " AND target_key = ?"
         args.append(target_key)

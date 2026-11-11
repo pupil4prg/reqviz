@@ -3,6 +3,10 @@
 業務要件からインフラ設計までのパラメータと、その算出式・制約・関連をグラフで可視化し、
 確定的な計算と AI による定性評価、変更・承認・版管理までを一元管理する Web アプリです。
 
+パラメータ（単一の値）に加えて、実装方式の選択肢のような**列挙データ**と、テキストや JSON などの**不定形データ**も
+構成項目として管理できます。画面でできる操作はすべて **REST API** から行え、同じ API を **MCP** のツールと
+**A2A** の対話エージェントとしても公開しています。変更はすべて履歴に残り、過去の時点の再現・差分・復元ができます。
+
 - 実行時の依存は **Python 標準ライブラリのみ**（`http.server` / `sqlite3` / `urllib` / `ast`）
 - 画面は **Vanilla JS + SVG**（外部 JS ライブラリ・CDN なし）。閉域網で動作します
 - AI は **OpenAI 互換 API**（LiteLLM Proxy / vLLM / Ollama など）を `urllib` で呼び出します
@@ -30,6 +34,10 @@ uv run --no-dev python -m reqviz
 | `REQVIZ_LLM_MODEL` | なし | モデル名 |
 | `REQVIZ_LLM_API_KEY` | なし | API キー（環境変数のみで指定。DB・画面には保存しない） |
 | `REQVIZ_LLM_TIMEOUT` | `60` | 秒 |
+| `REQVIZ_AGENT_ENDPOINTS` | `on` | `off` にすると `/mcp`・`/a2a`・Agent Card を公開しない |
+| `REQVIZ_PUBLIC_URL` | なし | Agent Card に載せる外向きの URL（リバースプロキシ配下など）。未指定ならリクエストの Host から決める |
+| `REQVIZ_ALLOWED_ORIGINS` | なし | `/mcp`・`/a2a` で追加で許可する Origin（カンマ区切り）。既定では同一オリジンのみ |
+| `REQVIZ_API_URL` | なし | stdio の MCP サーバーが使う reqviz サーバーの URL（`--url` と同じ） |
 
 LLM の接続先とモデルは画面の「設定」からも変更できます。LLM が未設定でも、式による計算・制約チェック・承認・版管理はすべて使えます。
 
@@ -43,6 +51,49 @@ LLM の接続先とモデルは画面の「設定」からも変更できます�
 6. **承認**: 下書き → AI評価済み（スキップ可） → レビュー中 → 承認済み。差し戻しにはコメントが必要です
 7. **版管理**: 全パラメータが承認済みで error 違反がなければ版を作成できます。warning が残る場合は承認時にコメントが必要です
 8. **書き出し**: 設計書（HTML）、パラメータシート（CSV）、全体／ルールのみ（JSON、Git での差分管理向け）
+
+## 構成項目（列挙データ・不定形データ）
+
+「構成項目」タブで、パラメータでは表せない構成情報を管理します。参照名はパラメータと同じ `レイヤーキー.キー` です。
+
+| 種別 | 内容 | 例 |
+|---|---|---|
+| 選択肢（`choice`） | 候補の一覧（説明・長所・短所・任意の属性）と、採用した候補 | セッション管理方式: sticky / redis / db |
+| 不定形データ（`document`） | テキスト・Markdown・YAML・任意の JSON | ネットワーク構成メモ、sysctl の設定一式 |
+
+- 選択肢の採用案は、ルールの式から `app.session_store == 'redis'` のように参照できます（代入先にはできません）。
+  採用案を変えると、それを参照する下流のパラメータに「要再計算」が付きます
+- 状態は 下書き → レビュー中 → 承認済み。内容（候補・採用案・本文）を変えると下書きに戻ります
+- 版（ベースライン）・テンプレート・JSON 書き出し／取り込み・設計書（HTML）に含まれます。未承認の構成項目があると版は作成できません
+
+## 履歴管理
+
+パラメータ・構成項目・ルールの変更は、変更前後の内容・操作者・コメントつきで 1 件ずつ記録されます
+（JSON 取り込み、版からの復元、テンプレートからの作成のような一括操作も、項目ごとに記録します）。
+
+| できること | 画面 | API |
+|---|---|---|
+| 1 項目の版の系列（名前変更もさかのぼる） | 構成項目の「履歴」、関連図の詳細パネル | `GET /api/systems/{id}/history/timeline?entity=&key=` |
+| 過去の時点の内容を再現 | ― | `GET /api/systems/{id}/history/state?at=` |
+| 2 時点間の差分 | 履歴 →「時点間の差分」 | `GET /api/systems/{id}/history/diff?from=&to=` |
+| 1 項目を過去の内容に戻す | 履歴 →「復元」 | `POST /api/revisions/{id}/restore` |
+| 全体を版の内容に戻す | 版管理 →「復元」 | `POST /api/baselines/{id}/restore` |
+
+時点は ISO 8601 の日時か `rev:<リビジョンID>` で指定します。承認・差し戻しなどの状態の変化は監査ログに残ります。
+
+## API・MCP・A2A
+
+すべて同じサーバー（既定 http://127.0.0.1:8765 ）で提供します。詳細は [docs/agent-integration.md](docs/agent-integration.md)。
+
+| 入口 | 場所 | 用途 |
+|---|---|---|
+| REST API | `/api/...`（`GET /api` でルート一覧） | 画面と同じ全操作。操作者名は `X-Reqviz-User` ヘッダー |
+| MCP（Streamable HTTP） | `POST /mcp` | REST API をツールとして公開。プロトコル 2026-07-28 と、`initialize` を使う 2025-11-25 / 2025-06-18 / 2025-03-26 |
+| MCP（stdio） | `uv run --no-dev python -m reqviz.mcp [--url URL]` | 同上。`--url` なしなら DB を直接開く |
+| A2A（JSON-RPC） | `POST /a2a`、Agent Card は `/.well-known/agent-card.json` | A2A 1.0。文章での対話（LLM 設定時）と、ツールの直接指定 |
+
+A2A の対話では、データを変更する操作の前にエージェントが内容を示して確認を求めます（タスクは `TASK_STATE_INPUT_REQUIRED` になり、
+同じタスクに「はい」と返すと実行）。呼び出し側が責任を持つ場合は、リクエストの `metadata.autoApprove = true` で省略できます。
 
 ## ルールの書き方
 
@@ -73,12 +124,20 @@ reqviz/
   ai/         OpenAI 互換クライアント、プロンプト、ジョブ、提案の採用
   io/         CSV / HTML 書き出し
   api/        REST API のルーティング
+  agent/      ツール定義（REST API への対応表）と対話エンジン。MCP と A2A が共有する
+  mcp/        MCP サーバー（プロトコル処理、stdio の入口）
+  a2a/        A2A サーバー（Agent Card、JSON-RPC、タスクの保存）
   static/     画面（Vanilla JS / SVG）
 templates/    同梱テンプレート
-tests/        pytest（engine / workflow / api / ai）
+tests/        pytest（engine / workflow / api / ai / agent）
 ```
 
 ## MVP の制限（フェーズ 2 で対応予定）
 
 - ログイン認証・ロール（設計者／承認者）は未実装です。操作者名はブラウザごとの自己申告で、自己承認も可能です（監査ログには記録されます）
-- 共有サーバーで使う場合は、信頼できるネットワーク内に限定してください
+- 共有サーバーで使う場合は、信頼できるネットワーク内に限定してください。REST API・MCP・A2A にも認証はありません
+  （`/mcp` と `/a2a` は、ブラウザ経由の攻撃を避けるため Origin ヘッダーだけ検証します）
+- MCP が提供するのはツールのみです（resources / prompts、SSE によるストリーミング応答、`subscriptions/listen` は未対応）
+- A2A はストリーミング（`SendStreamingMessage`）とプッシュ通知に未対応です。reqviz から他のエージェントを呼び出す機能もありません
+- 選択肢項目は、関連図にはノードとして表示されません（式からの参照と要再計算の伝播は働きます）
+- 過去の時点の再現は内容（値・候補・本文・式）が対象です。v0.1 で行った一括操作（取り込み・版からの復元）より前の時点は正確に再現できません

@@ -4,7 +4,7 @@ import { api } from "../api.js";
 import { refreshNav } from "../main.js";
 import { BASELINE_LABELS, confirmDialog, fmtTime, fmtValue, h, modal, promptComment, showError, toast, fill } from "../ui.js";
 
-const SECTION_LABELS = { params: "パラメータ", rules: "ルール", layers: "レイヤー", relations: "関連" };
+const SECTION_LABELS = { params: "パラメータ", items: "構成項目", rules: "ルール", layers: "レイヤー", relations: "関連" };
 const CHANGE_LABELS = { added: "追加", removed: "削除", modified: "変更" };
 
 export async function render(root, { sid }) {
@@ -18,7 +18,7 @@ export async function render(root, { sid }) {
       h("h1", {}, "版管理"),
       h("div", { class: "card" },
         h("h3", {}, "新しい版を作成してレビューに出す"),
-        h("p", { class: "small muted" }, "作成時点のパラメータ・ルール・関連・レイヤーをすべて凍結して保存します。承認済みの版は変更できません。"),
+        h("p", { class: "small muted" }, "作成時点のパラメータ・構成項目・ルール・関連・レイヤーをすべて凍結して保存します。承認済みの版は変更できません。"),
         readiness.ready
           ? h("div", { class: "alert ok small" }, "版を作成できます。",
             readiness.warnings.length ? h("div", {}, `warning の制約違反が ${readiness.warnings.length} 件あります（承認時にコメントが必要です）。`) : null)

@@ -145,7 +145,7 @@ def update_layer(ctx: Ctx, layer_id: int, data: dict[str, Any]) -> dict[str, Any
         if new_key != layer["key"]:
             mapping = {
                 f"{layer['key']}.{p['key']}": f"{new_key}.{p['key']}"
-                for p in repo.list_params(ctx, sid)
+                for p in repo.list_params(ctx, sid) + repo.list_items(ctx, sid)
                 if p["layer_id"] == layer_id
             }
         else:
@@ -168,6 +168,9 @@ def delete_layer(ctx: Ctx, layer_id: int) -> None:
     n = ctx.conn.execute("SELECT COUNT(*) FROM params WHERE layer_id = ?", (layer_id,)).fetchone()[0]
     if n:
         raise Invalid(f"レイヤー {layer['key']} にはパラメータが {n} 件あるため削除できません")
+    m = ctx.conn.execute("SELECT COUNT(*) FROM items WHERE layer_id = ?", (layer_id,)).fetchone()[0]
+    if m:
+        raise Invalid(f"レイヤー {layer['key']} には構成項目が {m} 件あるため削除できません")
     with transaction(ctx.conn):
         ctx.conn.execute("DELETE FROM layers WHERE id = ?", (layer_id,))
         history.add_revision(ctx, layer["system_id"], "layer", layer["key"], "delete", before={"key": layer["key"], "name": layer["name"]})
@@ -271,15 +274,23 @@ def _param_fields(ctx: Ctx, system_id: int, data: dict[str, Any], current: dict[
     return fields
 
 
+def check_ref_unique(
+    ctx: Ctx, system_id: int, layer_id: int, key: str, exclude: tuple[str, int] | None = None
+) -> None:
+    """参照名（layer.key）がパラメータ・構成項目を通じて一意であることを確認する。"""
+    for kind, table, label in (("param", "params", "パラメータ"), ("item", "items", "構成項目")):
+        row = ctx.conn.execute(
+            f"SELECT id FROM {table} WHERE system_id = ? AND layer_id = ? AND key = ?", (system_id, layer_id, key)
+        ).fetchone()
+        if row and (kind, row["id"]) != exclude:
+            raise Invalid(f"同じレイヤーにキー {key} の{label}が既にあります")
+
+
 def _check_param_key_unique(ctx: Ctx, system_id: int, layer_id: int, key: str, exclude_id: int | None) -> None:
-    row = ctx.conn.execute(
-        "SELECT id FROM params WHERE system_id = ? AND layer_id = ? AND key = ?", (system_id, layer_id, key)
-    ).fetchone()
-    if row and row["id"] != exclude_id:
-        raise Invalid(f"同じレイヤーにキー {key} のパラメータが既にあります")
+    check_ref_unique(ctx, system_id, layer_id, key, None if exclude_id is None else ("param", exclude_id))
 
 
-def create_param(ctx: Ctx, system_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_param(ctx: Ctx, system_id: int, data: dict[str, Any], comment: str = "") -> dict[str, Any]:
     repo.get_system(ctx, system_id)
     fields = _param_fields(ctx, system_id, data, None)
     with transaction(ctx.conn):
@@ -290,7 +301,7 @@ def create_param(ctx: Ctx, system_id: int, data: dict[str, Any]) -> dict[str, An
             f"INSERT INTO params ({cols}) VALUES ({', '.join('?' * len(fields))})", list(fields.values())
         )
         p = repo.get_param(ctx, cur.lastrowid)
-        history.add_revision(ctx, system_id, "param", p["ref"], "create", after=param_snapshot(p))
+        history.add_revision(ctx, system_id, "param", p["ref"], "create", after=param_snapshot(p), comment=comment)
         # 算出式の代入先として既に参照されているなら要再計算
         targets = {r["target"] for r in repo.list_rules(ctx, system_id) if r["kind"] == "formula" and r["enabled"]}
         if p["ref"] in targets:
@@ -356,7 +367,7 @@ def set_flags(ctx: Ctx, system_id: int, stale: Iterable[str], upstream_changed: 
             ctx.conn.execute("UPDATE params SET flag_upstream_changed = 1 WHERE id = ?", (by_ref[ref]["id"],))
 
 
-def delete_param(ctx: Ctx, param_id: int) -> None:
+def delete_param(ctx: Ctx, param_id: int, comment: str = "") -> None:
     p = repo.get_param(ctx, param_id)
     sid = p["system_id"]
     users = []
@@ -367,7 +378,7 @@ def delete_param(ctx: Ctx, param_id: int) -> None:
         raise Invalid(f"パラメータ {p['ref']} はルールから参照されているため削除できません", {"rules": users})
     with transaction(ctx.conn):
         ctx.conn.execute("DELETE FROM params WHERE id = ?", (param_id,))
-        history.add_revision(ctx, sid, "param", p["ref"], "delete", before=param_snapshot(p))
+        history.add_revision(ctx, sid, "param", p["ref"], "delete", before=param_snapshot(p), comment=comment)
         _touch_system(ctx, sid)
 
 
@@ -394,11 +405,31 @@ def create_relation(ctx: Ctx, system_id: int, data: dict[str, Any]) -> dict[str,
     return next(r for r in repo.list_relations(ctx, system_id) if r["id"] == cur.lastrowid)
 
 
-def delete_relation(ctx: Ctx, relation_id: int) -> None:
+def get_relation(ctx: Ctx, relation_id: int) -> dict[str, Any]:
     row = ctx.conn.execute("SELECT system_id FROM relations WHERE id = ?", (relation_id,)).fetchone()
     if row is None:
         raise NotFound(f"関連が見つかりません: {relation_id}")
-    rel = next(r for r in repo.list_relations(ctx, row["system_id"]) if r["id"] == relation_id)
+    return next(r for r in repo.list_relations(ctx, row["system_id"]) if r["id"] == relation_id)
+
+
+def update_relation(ctx: Ctx, relation_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    """関連のメモを更新する（端点を変える場合は削除して作り直す）。"""
+    rel = get_relation(ctx, relation_id)
+    note = data.get("note") or ""
+    if not isinstance(note, str):
+        raise Invalid("note は文字列で指定してください")
+    with transaction(ctx.conn):
+        ctx.conn.execute("UPDATE relations SET note = ? WHERE id = ?", (note, relation_id))
+        history.add_revision(
+            ctx, rel["system_id"], "relation", f"{rel['from_ref']}->{rel['to_ref']}", "update",
+            before={"note": rel["note"]}, after={"note": note},
+        )
+        _touch_system(ctx, rel["system_id"])
+    return get_relation(ctx, relation_id)
+
+
+def delete_relation(ctx: Ctx, relation_id: int) -> None:
+    rel = get_relation(ctx, relation_id)
     with transaction(ctx.conn):
         ctx.conn.execute("DELETE FROM relations WHERE id = ?", (relation_id,))
         history.add_revision(
@@ -471,7 +502,7 @@ def _after_rule_change(ctx: Ctx, system_id: int, targets: Iterable[str | None]) 
     set_flags(ctx, system_id, stale, upstream)
 
 
-def create_rule(ctx: Ctx, system_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_rule(ctx: Ctx, system_id: int, data: dict[str, Any], comment: str = "") -> dict[str, Any]:
     repo.get_system(ctx, system_id)
     fields = _rule_fields(data, None)
     with transaction(ctx.conn):
@@ -484,14 +515,14 @@ def create_rule(ctx: Ctx, system_id: int, data: dict[str, Any]) -> dict[str, Any
             f"INSERT INTO rules ({cols}) VALUES ({', '.join('?' * len(fields))})", list(fields.values())
         )
         r = repo.get_rule(ctx, cur.lastrowid)
-        history.add_revision(ctx, system_id, "rule", r["key"], "create", after=rule_snapshot(r))
+        history.add_revision(ctx, system_id, "rule", r["key"], "create", after=rule_snapshot(r), comment=comment)
         if r["kind"] == "formula" and r["enabled"]:
             _after_rule_change(ctx, system_id, [r["target"]])
         _touch_system(ctx, system_id)
     return r
 
 
-def update_rule(ctx: Ctx, rule_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def update_rule(ctx: Ctx, rule_id: int, data: dict[str, Any], comment: str = "") -> dict[str, Any]:
     before = repo.get_rule(ctx, rule_id)
     sid = before["system_id"]
     fields = _rule_fields(data, before)
@@ -502,7 +533,10 @@ def update_rule(ctx: Ctx, rule_id: int, data: dict[str, Any]) -> dict[str, Any]:
         changed = {k: v for k, v in fields.items() if v != (int(before[k]) if k == "enabled" else before[k])}
         _update_row(ctx, "rules", rule_id, changed, data.get("row_version"))
         after = repo.get_rule(ctx, rule_id)
-        history.add_revision(ctx, sid, "rule", after["key"], "update", before=rule_snapshot(before), after=rule_snapshot(after))
+        history.add_revision(
+            ctx, sid, "rule", after["key"], "update",
+            before=rule_snapshot(before), after=rule_snapshot(after), comment=comment,
+        )
         affected = []
         if before["kind"] == "formula" and before["enabled"]:
             affected.append(before["target"])
@@ -514,12 +548,12 @@ def update_rule(ctx: Ctx, rule_id: int, data: dict[str, Any]) -> dict[str, Any]:
     return after
 
 
-def delete_rule(ctx: Ctx, rule_id: int) -> None:
+def delete_rule(ctx: Ctx, rule_id: int, comment: str = "") -> None:
     r = repo.get_rule(ctx, rule_id)
     sid = r["system_id"]
     with transaction(ctx.conn):
         ctx.conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
-        history.add_revision(ctx, sid, "rule", r["key"], "delete", before=rule_snapshot(r))
+        history.add_revision(ctx, sid, "rule", r["key"], "delete", before=rule_snapshot(r), comment=comment)
         if r["kind"] == "formula" and r["enabled"]:
             _after_rule_change(ctx, sid, [r["target"]])
         _touch_system(ctx, sid)

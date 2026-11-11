@@ -117,6 +117,42 @@ def list_relations(ctx: Ctx, system_id: int) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+_ITEM_SQL = """
+SELECT i.*, l.key AS layer_key, l.sort_order AS layer_order
+FROM items i JOIN layers l ON l.id = i.layer_id
+"""
+
+
+def item_dict(r: Any) -> dict[str, Any]:
+    d = dict(r)
+    d["ref"] = f"{d['layer_key']}.{d['key']}"
+    d["options"] = loads(d["options"], [])
+    d["tags"] = loads(d["tags"], [])
+    d["content"] = loads(d["content"])
+    return d
+
+
+def list_items(ctx: Ctx, system_id: int, kind: str | None = None) -> list[dict[str, Any]]:
+    sql = _ITEM_SQL + " WHERE i.system_id = ?"
+    args: list[Any] = [system_id]
+    if kind:
+        sql += " AND i.kind = ?"
+        args.append(kind)
+    rows = ctx.conn.execute(sql + " ORDER BY l.sort_order, l.id, i.id", args).fetchall()
+    return [item_dict(r) for r in rows]
+
+
+def get_item(ctx: Ctx, item_id: int) -> dict[str, Any]:
+    r = ctx.conn.execute(_ITEM_SQL + " WHERE i.id = ?", (item_id,)).fetchone()
+    if r is None:
+        raise NotFound(f"構成項目が見つかりません: {item_id}")
+    return item_dict(r)
+
+
+def items_by_ref(ctx: Ctx, system_id: int) -> dict[str, dict[str, Any]]:
+    return {i["ref"]: i for i in list_items(ctx, system_id)}
+
+
 def to_engine_param(p: dict[str, Any]) -> Param:
     return Param(ref=p["ref"], type=p["type"], value=p["value"], enum_options=p["enum_options"], status=p["status"])
 
@@ -134,7 +170,19 @@ def to_engine_rule(r: dict[str, Any]) -> Rule:
     )
 
 
+def choice_to_engine_param(i: dict[str, Any]) -> Param:
+    """選択肢項目を、式から参照できる読み取り専用の enum 値として扱う（値 = 採用した選択肢のキー）。"""
+    return Param(
+        ref=i["ref"], type="enum", value=i["selected"],
+        enum_options=[o["key"] for o in i["options"]],
+        status="approved" if i["status"] == "approved" else "draft",
+        assignable=False,
+    )
+
+
 def load_engine_model(ctx: Ctx, system_id: int) -> tuple[list[Param], list[Rule]]:
+    """パラメータと、選択肢項目（式から参照可能・代入不可）を合わせたエンジン用モデル。"""
     params = [to_engine_param(p) for p in list_params(ctx, system_id)]
+    params += [choice_to_engine_param(i) for i in list_items(ctx, system_id, "choice")]
     rules = [to_engine_rule(r) for r in list_rules(ctx, system_id)]
     return params, rules

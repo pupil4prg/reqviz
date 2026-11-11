@@ -126,6 +126,12 @@ export function fmtValue(v) {
   return String(v);
 }
 
+/** 任意の値を 1 行で表示する（オブジェクト・配列は JSON、長いものは省略） */
+export function fmtAny(v, max = 160) {
+  const text = v !== null && typeof v === "object" ? JSON.stringify(v) : fmtValue(v);
+  return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
 export function fmtTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);

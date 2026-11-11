@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from html import escape
 from typing import Any
 
@@ -146,6 +147,7 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px;border-bott
 .meta{color:#5f6368;font-size:13px}.graph{overflow:auto;border:1px solid #dadce0;border-radius:8px;padding:8px}
 table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #dadce0;padding:4px 8px;text-align:left;vertical-align:top}
 th{background:#f1f3f4}code{font-family:Consolas,monospace;font-size:12px}.error{color:#d93025;font-weight:bold}.warning{color:#b06000;font-weight:bold}
+pre{background:#f1f3f4;border-radius:6px;padding:8px 12px;font-size:12px;white-space:pre-wrap;word-break:break-word}h3 code{font-weight:normal;color:#5f6368}
 """
 
 
@@ -187,6 +189,34 @@ def to_html(ctx: Ctx, system_id: int) -> bytes:
                 f"<td>{escape(n['ref_doc'])}</td></tr>"
             )
         h.append("</table>")
+
+    items = repo.list_items(ctx, system_id)
+    if items:
+        item_status = {"draft": "下書き", "in_review": "レビュー中", "approved": "承認済み"}
+        h.append("<h2>構成項目</h2>")
+        for i in items:
+            h.append(
+                f"<h3>{escape(i['name'])} <code>{escape(i['ref'])}</code></h3>"
+                f"<div class='meta'>{'選択肢' if i['kind'] == 'choice' else '不定形データ'} ／ "
+                f"{escape(item_status.get(i['status'], i['status']))}"
+                + (f" ／ 出典: {escape(i['ref_doc'])}" if i["ref_doc"] else "") + "</div>"
+            )
+            if i["kind"] == "choice":
+                h.append("<table><tr><th>採用</th><th>キー</th><th>名前</th><th>説明</th><th>長所</th><th>短所</th></tr>")
+                for o in i["options"]:
+                    h.append(
+                        f"<tr><td>{'●' if o['key'] == i['selected'] else ''}</td><td><code>{escape(o['key'])}</code></td>"
+                        f"<td>{escape(o['label'])}</td><td>{escape(o['description'])}</td>"
+                        f"<td>{escape('／'.join(o['pros']))}</td><td>{escape('／'.join(o['cons']))}</td></tr>"
+                    )
+                h.append("</table>")
+            else:
+                body = i["content"]
+                if not isinstance(body, str):
+                    body = json.dumps(body, ensure_ascii=False, indent=2)
+                h.append(f"<pre>{escape(body or '')}</pre>")
+            if i["rationale"]:
+                h.append(f"<p>根拠: {escape(i['rationale'])}</p>")
 
     h.append("<h2>ルール一覧</h2><table><tr><th>キー</th><th>種別</th><th>対象</th><th>内容</th><th>重要度</th><th>説明</th></tr>")
     kind_labels = {"formula": "算出式", "constraint": "制約", "nl": "自然言語"}
