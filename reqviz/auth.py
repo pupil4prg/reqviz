@@ -245,6 +245,22 @@ def delete_user(ctx: Ctx, user_id: int, acting: Principal | None = None) -> None
         history.audit(ctx, None, "user.delete", "user", user["login"])
 
 
+def reset_password(ctx: Ctx, login_id: str, password: str, revoke_tokens: bool = False) -> dict[str, Any]:
+    """ID を指定してパスワードを再設定する（コマンドライン用。管理者の画面操作と同じ扱い）。
+
+    本人は次のログイン時にパスワードを変更する。ログイン中のセッションは切れる。
+    """
+    row = ctx.conn.execute("SELECT id FROM users WHERE login = ? COLLATE NOCASE", (login_id.strip(),)).fetchone()
+    if row is None:
+        raise NotFound(f"アカウントが見つかりません: {login_id}")
+    with transaction(ctx.conn):
+        user = update_user(ctx, row["id"], {"password": password})
+        if revoke_tokens:
+            ctx.conn.execute("DELETE FROM api_tokens WHERE user_id = ?", (row["id"],))
+            history.audit(ctx, None, "auth.token_revoke_all", "user", user["login"])
+    return user
+
+
 def ensure_admin(conn: sqlite3.Connection, login: str, password: str | None) -> tuple[str, str] | None:
     """アカウントが 1 件もなければ最初の管理者を作る。パスワードを自動生成した場合は (ID, パスワード) を返す。"""
     if conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
