@@ -19,8 +19,25 @@
 uv run --no-dev python -m reqviz
 ```
 
-ブラウザで http://127.0.0.1:8765/ を開きます。初回起動時に DB（`data/reqviz.db`）を作成し、
+ブラウザで http://127.0.0.1:8765/ を開くと、ログイン画面が表示されます。初回起動時に DB（`data/reqviz.db`）を作成し、
 同梱テンプレート「Web三層」（`templates/web-3tier.json`）を登録します。
+
+### ログインとアカウント
+
+- 初回起動時に、最初の管理者アカウント（既定の ID は `admin`）を作成します。初期パスワードは自動生成して
+  **起動時のコンソールに 1 度だけ表示**します（`REQVIZ_ADMIN_PASSWORD` で指定することもできます）
+- アカウントを作成できるのは管理者だけです（画面右上の「ユーザー管理」）。自己登録はありません。
+  管理者が決めた初期パスワードを本人に伝え、本人は最初のログイン時に必ず自分のパスワードに変更します
+- 履歴と監査ログの操作者には、ログインした ID が記録されます
+
+| ロール | できること |
+|---|---|
+| 設計者 | 参照・編集・再計算・レビュー依頼 |
+| 承認者 | 上記に加えて、パラメータ・構成項目・版の承認と差し戻し |
+| 管理者 | すべて。アカウント管理と LLM の接続設定は管理者のみ |
+
+パスワードを忘れた場合は、管理者が「パスワード再設定」で新しい初期パスワードを設定します。管理者が自分のパスワードを失った場合は、
+他の管理者に依頼してください（管理者が 1 人だけの環境では、2 人目の管理者を作っておくことを勧めます）。
 
 ### 環境変数
 
@@ -29,7 +46,12 @@ uv run --no-dev python -m reqviz
 | `REQVIZ_HOST` | `127.0.0.1` | 待ち受けアドレス（共有する場合は `0.0.0.0`） |
 | `REQVIZ_PORT` | `8765` | ポート |
 | `REQVIZ_DB_PATH` | `data/reqviz.db` | SQLite ファイル |
-| `REQVIZ_USER` | `designer` | 操作者名の既定値（画面の設定で上書き可） |
+| `REQVIZ_AUTH` | `on` | `off` にするとログイン認証を行わない（単独利用・検証用。操作者名は自己申告になる） |
+| `REQVIZ_ADMIN_USER` | `admin` | アカウントが 1 件もないときに作る、最初の管理者の ID |
+| `REQVIZ_ADMIN_PASSWORD` | なし | 最初の管理者のパスワード。未指定なら自動生成して起動時に表示し、初回ログインで変更させる |
+| `REQVIZ_SESSION_HOURS` | `12` | ログインの有効時間 |
+| `REQVIZ_COOKIE_SECURE` | `off` | HTTPS で公開する場合は `on`（セッション Cookie に Secure 属性を付ける） |
+| `REQVIZ_USER` | `designer` | 認証が無効なときの操作者名の既定値 |
 | `REQVIZ_LLM_BASE_URL` | なし | 例: `http://llm-proxy.internal:4000/v1` |
 | `REQVIZ_LLM_MODEL` | なし | モデル名 |
 | `REQVIZ_LLM_API_KEY` | なし | API キー（環境変数のみで指定。DB・画面には保存しない） |
@@ -38,6 +60,7 @@ uv run --no-dev python -m reqviz
 | `REQVIZ_PUBLIC_URL` | なし | Agent Card に載せる外向きの URL（リバースプロキシ配下など）。未指定ならリクエストの Host から決める |
 | `REQVIZ_ALLOWED_ORIGINS` | なし | `/mcp`・`/a2a` で追加で許可する Origin（カンマ区切り）。既定では同一オリジンのみ |
 | `REQVIZ_API_URL` | なし | stdio の MCP サーバーが使う reqviz サーバーの URL（`--url` と同じ） |
+| `REQVIZ_API_TOKEN` | なし | stdio の MCP サーバーが `--url` のサーバーに渡す API トークン（`--token` と同じ） |
 
 LLM の接続先とモデルは画面の「設定」からも変更できます。LLM が未設定でも、式による計算・制約チェック・承認・版管理はすべて使えます。
 
@@ -87,10 +110,13 @@ LLM の接続先とモデルは画面の「設定」からも変更できます�
 
 | 入口 | 場所 | 用途 |
 |---|---|---|
-| REST API | `/api/...`（`GET /api` でルート一覧） | 画面と同じ全操作。操作者名は `X-Reqviz-User` ヘッダー |
+| REST API | `/api/...`（`GET /api` でルート一覧） | 画面と同じ全操作 |
 | MCP（Streamable HTTP） | `POST /mcp` | REST API をツールとして公開。プロトコル 2026-07-28 と、`initialize` を使う 2025-11-25 / 2025-06-18 / 2025-03-26 |
 | MCP（stdio） | `uv run --no-dev python -m reqviz.mcp [--url URL]` | 同上。`--url` なしなら DB を直接開く |
 | A2A（JSON-RPC） | `POST /a2a`、Agent Card は `/.well-known/agent-card.json` | A2A 1.0。文章での対話（LLM 設定時）と、ツールの直接指定 |
+
+プログラムやエージェントから使うときは、画面の「設定」で発行した **API トークン**を `Authorization: Bearer <トークン>` で渡します
+（MCP と A2A は API トークンが必須）。操作はトークンの持ち主の ID とロールで行われます。
 
 A2A の対話では、データを変更する操作の前にエージェントが内容を示して確認を求めます（タスクは `TASK_STATE_INPUT_REQUIRED` になり、
 同じタスクに「はい」と返すと実行）。呼び出し側が責任を持つ場合は、リクエストの `metadata.autoApprove = true` で省略できます。
@@ -124,6 +150,7 @@ reqviz/
   ai/         OpenAI 互換クライアント、プロンプト、ジョブ、提案の採用
   io/         CSV / HTML 書き出し
   api/        REST API のルーティング
+  auth.py     ログイン認証（パスワード、セッション、API トークン、アカウント管理）
   agent/      ツール定義（REST API への対応表）と対話エンジン。MCP と A2A が共有する
   mcp/        MCP サーバー（プロトコル処理、stdio の入口）
   a2a/        A2A サーバー（Agent Card、JSON-RPC、タスクの保存）
@@ -132,11 +159,12 @@ templates/    同梱テンプレート
 tests/        pytest（engine / workflow / api / ai / agent）
 ```
 
-## MVP の制限（フェーズ 2 で対応予定）
+## 制限
 
-- ログイン認証・ロール（設計者／承認者）は未実装です。操作者名はブラウザごとの自己申告で、自己承認も可能です（監査ログには記録されます）
-- 共有サーバーで使う場合は、信頼できるネットワーク内に限定してください。REST API・MCP・A2A にも認証はありません
-  （`/mcp` と `/a2a` は、ブラウザ経由の攻撃を避けるため Origin ヘッダーだけ検証します）
+- 承認者・管理者は、自分が編集した項目を自分で承認できます（監査ログには記録されます）
+- 通信の暗号化は行いません。共有サーバーで使う場合は、HTTPS を終端するリバースプロキシを前段に置き、`REQVIZ_COOKIE_SECURE=on` にしてください
+- ログイン失敗の回数制限（5 回で 5 分）はプロセス内で数えるため、再起動で解除されます
+- MCP の認証は固定の API トークンです（MCP 仕様の OAuth による認可には未対応）
 - MCP が提供するのはツールのみです（resources / prompts、SSE によるストリーミング応答、`subscriptions/listen` は未対応）
 - A2A はストリーミング（`SendStreamingMessage`）とプッシュ通知に未対応です。reqviz から他のエージェントを呼び出す機能もありません
 - 選択肢項目は、関連図にはノードとして表示されません（式からの参照と要再計算の伝播は働きます）

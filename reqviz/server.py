@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import mimetypes
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from . import __version__, db
+from . import __version__, auth, db
 from .a2a.server import A2AServer, agent_card
 from .agent.tools import InProcessClient
 from .ai import jobs
@@ -27,6 +28,7 @@ from .workflow import templates
 
 STATIC_DIR = Path(__file__).parent / "static"
 AGENT_CARD_PATH = "/.well-known/agent-card.json"
+PUBLIC_API = ("/api/auth/login", "/api/auth/logout", "/api/auth/me")  # ログイン前でも呼べる API
 MAX_BODY = 10 * 1024 * 1024
 log = logging.getLogger("reqviz")
 
@@ -53,9 +55,12 @@ class App:
             config.db_path, client, lambda ctx: jobs.effective_llm_config(ctx, config.llm), __version__,
             run_in_thread=run_ai_in_thread,
         )
+        self.bootstrap_admin: tuple[str, str] | None = None
         conn = db.connect(config.db_path)
         try:
             db.migrate(conn)
+            if config.auth_enabled:
+                self.bootstrap_admin = auth.ensure_admin(conn, config.admin_user, config.admin_password)
             if config.templates_dir.is_dir():
                 templates.seed_bundled(Ctx(conn, "system"), config.templates_dir)
         finally:
@@ -65,7 +70,22 @@ class App:
         if self.run_ai_in_thread:
             jobs.start_in_thread(self.config.db_path, actor, run_id, cfg)
 
-    def handle(self, method: str, raw_path: str, headers: Any, body: bytes) -> Response:
+    def internal_principal(self, actor: str | None) -> auth.Principal:
+        """認証済みの入口（MCP・A2A）から内部で API を呼ぶときの利用者。ロールは DB から引き直す。"""
+        actor = actor or self.config.default_user
+        if not self.config.auth_enabled:
+            return auth.Principal(actor)
+        conn = db.connect(self.config.db_path)
+        try:
+            found = auth.lookup(conn, actor)
+        finally:
+            conn.close()
+        if found is None:
+            raise auth.Unauthorized(f"アカウントが無効です: {actor}")
+        return found
+
+    def handle(self, method: str, raw_path: str, headers: Any, body: bytes, principal: auth.Principal | None = None) -> Response:
+        """リクエストを処理する。principal を渡すのは、認証済みの入口から内部で呼ぶ場合だけ。"""
         parts = urlsplit(raw_path)
         path = unquote(parts.path)
         if self.config.agent_endpoints and path in ("/mcp", "/a2a", AGENT_CARD_PATH):
@@ -82,15 +102,22 @@ class App:
 
         conn = db.connect(self.config.db_path)
         try:
-            actor = (headers.get("X-Reqviz-User") or "").strip() or self.config.default_user
-            ctx = Ctx(conn, unquote(actor)[:64])
+            if principal is not None:
+                actor = principal.login
+            elif self.config.auth_enabled:
+                principal = auth.authenticate(conn, headers)
+                self._authorize(method, path, headers, principal)
+                actor = principal.login if principal else "anonymous"
+            else:
+                actor = unquote((headers.get("X-Reqviz-User") or "").strip())[:64] or self.config.default_user
+            ctx = Ctx(conn, actor)
             parsed: Any = None
             if body:
                 try:
                     parsed = json.loads(body.decode("utf-8"))
                 except (UnicodeDecodeError, ValueError):
                     raise BadRequest("リクエスト本文が JSON ではありません") from None
-            req = Request(method, path, ctx, params, dict(parse_qsl(parts.query)), parsed, self)
+            req = Request(method, path, ctx, params, dict(parse_qsl(parts.query)), parsed, self, principal)
             result = handler(req)
             if isinstance(result, Response):
                 return result
@@ -105,10 +132,37 @@ class App:
         finally:
             conn.close()
 
+    @staticmethod
+    def _authorize(method: str, path: str, headers: Any, principal: auth.Principal | None) -> None:
+        """REST API の入口での確認（未ログイン、CSRF、初期パスワードの変更待ち）。"""
+        if path in PUBLIC_API:
+            return
+        if principal is None:
+            raise auth.Unauthorized("ログインが必要です")
+        if principal.via == "session" and method not in ("GET", "HEAD"):
+            sent = (headers.get("X-CSRF-Token") or "").strip()
+            if not sent or not hmac.compare_digest(sent, principal.csrf_token or ""):
+                raise auth.Forbidden("CSRF トークンが一致しません。画面を再読み込みしてください")
+        if principal.must_change_password and not path.startswith("/api/auth/"):
+            err = auth.Forbidden("初期パスワードを変更してください")
+            err.code = "password_change_required"
+            raise err
+
     # ------------------------------------------------------------ MCP / A2A
 
     def _actor(self, headers: Any, fallback: str) -> str:
         return unquote((headers.get("X-Reqviz-User") or "").strip())[:64] or fallback
+
+    def _agent_actor(self, headers: Any, fallback: str) -> str | None:
+        """MCP・A2A の操作者。認証が有効なら API トークンが必須で、なければ None。"""
+        if not self.config.auth_enabled:
+            return self._actor(headers, fallback)
+        conn = db.connect(self.config.db_path)
+        try:
+            p = auth.authenticate(conn, headers, allow_cookie=False)
+        finally:
+            conn.close()
+        return p.login if p and not p.must_change_password else None
 
     def _origin_allowed(self, headers: Any) -> bool:
         """DNS リバインディング対策。Origin があるときは、自分自身か許可リストのものだけを通す。"""
@@ -133,18 +187,23 @@ class App:
         if path == AGENT_CARD_PATH:
             if method not in ("GET", "HEAD"):
                 return Response(b"", status=405, headers={"Allow": "GET"})
-            return as_json(agent_card(self.base_url(headers), __version__))
+            return as_json(agent_card(self.base_url(headers), __version__, self.config.auth_enabled))
         if not self._origin_allowed(headers):
             return as_json(error_response(None, -32600, "Forbidden: Origin is not allowed"), 403)
         if method != "POST":
             return Response(b"", status=405, headers={"Allow": "POST"})
+        actor = self._agent_actor(headers, "a2a" if path == "/a2a" else "mcp")
+        if actor is None:
+            res = as_json(error_response(None, -32600, "Unauthorized: a valid API token is required (Authorization: Bearer <token>)"), 401)
+            res.headers["WWW-Authenticate"] = 'Bearer realm="reqviz"'
+            return res
         if path == "/a2a":
-            return as_json(self.a2a.handle(body, headers, query, self._actor(headers, "a2a")))
+            return as_json(self.a2a.handle(body, headers, query, actor))
         try:
             msg = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             return as_json(error_response(None, PARSE_ERROR, "Parse error"), 400)
-        status, res = self.mcp.handle(msg, headers, self._actor(headers, "mcp"))
+        status, res = self.mcp.handle(msg, headers, actor)
         return Response(b"", status=status) if res is None else as_json(res, status)
 
     def static(self, path: str) -> Response:

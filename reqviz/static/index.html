@@ -12,8 +12,10 @@
     <a class="brand" href="#/">要件パラメータ可視化</a>
     <nav id="system-nav" class="system-nav"></nav>
     <div class="topbar-right">
-      <a href="#/settings" class="link-muted">設定</a>
-      <span id="user-badge" class="user-badge" title="操作者（設定で変更）"></span>
+      <a href="#/users" id="users-link" class="link-muted" hidden>ユーザー管理</a>
+      <a href="#/settings" id="settings-link" class="link-muted">設定</a>
+      <span id="user-badge" class="user-badge"></span>
+      <button id="logout-btn" class="small" type="button" hidden>ログアウト</button>
     </div>
   </header>
   <main id="app"></main>

@@ -61,7 +61,17 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def agent_card(base_url: str, version: str) -> dict[str, Any]:
+def agent_card(base_url: str, version: str, auth_required: bool = False) -> dict[str, Any]:
+    card = _agent_card(base_url, version)
+    if auth_required:
+        card["securitySchemes"] = {
+            "apiToken": {"httpAuthSecurityScheme": {"scheme": "Bearer", "description": "reqviz の設定画面で発行した API トークン"}}
+        }
+        card["securityRequirements"] = [{"schemes": {"apiToken": {"list": []}}}]
+    return card
+
+
+def _agent_card(base_url: str, version: str) -> dict[str, Any]:
     modes = ["text/plain", "application/json"]
     return {
         "name": "reqviz",

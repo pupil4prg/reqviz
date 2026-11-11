@@ -14,6 +14,12 @@ def main() -> None:
     server = make_server(cfg)
     host, port = server.server_address[:2]
     print(f"reqviz を起動しました: http://{host}:{port}/  （DB: {cfg.db_path}）")
+    if not cfg.auth_enabled:
+        print("ログイン認証: 無効（REQVIZ_AUTH=off）")
+    elif server.app.bootstrap_admin:  # type: ignore[attr-defined]
+        login, password = server.app.bootstrap_admin  # type: ignore[attr-defined]
+        print(f"最初の管理者アカウントを作成しました。ID: {login}  初期パスワード: {password}")
+        print("  このパスワードは今回だけ表示されます。ログイン後に変更してください。")
     print("LLM:", f"{cfg.llm.base_url} / {cfg.llm.model}" if cfg.llm.enabled else "未設定（画面の設定から指定できます）")
     try:
         server.serve_forever()

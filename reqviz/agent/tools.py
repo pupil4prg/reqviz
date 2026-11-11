@@ -59,23 +59,29 @@ class InProcessClient:
         self.app = app
 
     def request(self, method: str, path: str, body: Any = None, actor: str | None = None) -> ApiResult:
-        headers = {"X-Reqviz-User": quote(actor)} if actor else {}
         raw = b"" if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
-        res = self.app.handle(method, path, headers, raw)
+        try:
+            principal = self.app.internal_principal(actor)
+        except Exception as e:  # アカウントが無効化された場合など
+            return ApiResult(401, {"error": {"code": "unauthorized", "message": str(e), "details": None}})
+        res = self.app.handle(method, path, {}, raw, principal)
         return _decode(res.status, res.content_type, res.body)
 
 
 class HttpClient:
     """起動中の reqviz サーバーの REST API を urllib で呼び出す。"""
 
-    def __init__(self, base_url: str, timeout: float = 30.0):
+    def __init__(self, base_url: str, timeout: float = 30.0, token: str = ""):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.token = token  # API トークン（サーバーでログイン認証が有効な場合に必要）
 
     def request(self, method: str, path: str, body: Any = None, actor: str | None = None) -> ApiResult:
         headers = {"Content-Type": "application/json"}
         if actor:
             headers["X-Reqviz-User"] = quote(actor)
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(self.base_url + path, data=data, method=method, headers=headers)
         try:

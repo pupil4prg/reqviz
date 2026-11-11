@@ -6,6 +6,7 @@ import json
 from typing import Any
 from urllib.parse import quote
 
+from .. import auth
 from ..ai import jobs
 from ..ai.prompts import PURPOSE_LABELS
 from ..errors import BadRequest, Invalid
@@ -42,6 +43,120 @@ def _json_bytes(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
 
+def _require(req: Request, *roles: str) -> None:
+    """ロールの確認。認証が無効なら何もしない。管理者は常に通す。"""
+    if not req.app.config.auth_enabled:
+        return
+    p = req.principal
+    if p is None or (p.role != "admin" and p.role not in roles):
+        need = "・".join(auth.ROLE_LABELS[r] for r in (roles or ("admin",)))
+        raise auth.Forbidden(f"この操作には{need}の権限が必要です")
+
+
+_APPROVER_ACTIONS = ("approve", "reject", "ack_upstream")
+
+
+def _json(obj: Any, headers: dict[str, str] | None = None) -> Response:
+    return Response(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"), headers=headers or {})
+
+
+# ---------------------------------------------------------------- 認証・アカウント
+
+@r("GET", "/api/auth/me")
+def auth_me(req: Request) -> Any:
+    """ログイン状態（未ログインなら user は null）と CSRF トークン"""
+    p = req.principal
+    return {
+        "auth_enabled": req.app.config.auth_enabled,
+        "user": p.public() if p else None,
+        "csrf_token": p.csrf_token if p else None,
+        "roles": auth.ROLE_LABELS,
+    }
+
+
+@r("POST", "/api/auth/login")
+def auth_login(req: Request) -> Any:
+    """ID とパスワードでログインし、セッション Cookie を発行する"""
+    cfg = req.app.config
+    if not cfg.auth_enabled:
+        raise BadRequest("ログイン認証は無効です")
+    data = req.json()
+    token, p = auth.login(req.ctx, data.get("login"), data.get("password"), cfg.session_hours)
+    return _json(
+        {"user": p.public(), "csrf_token": p.csrf_token},
+        {"Set-Cookie": auth.session_cookie(token, cfg.session_hours, cfg.cookie_secure)},
+    )
+
+
+@r("POST", "/api/auth/logout")
+def auth_logout(req: Request) -> Any:
+    """ログアウトする"""
+    auth.logout(req.ctx, req.principal)
+    return _json({"ok": True}, {"Set-Cookie": auth.clear_cookie(req.app.config.cookie_secure)})
+
+
+def _self(req: Request) -> auth.Principal:
+    if req.principal is None or req.principal.user_id is None:
+        raise BadRequest("ログイン認証が無効のため、この操作は使えません")
+    return req.principal
+
+
+@r("POST", "/api/auth/password")
+def auth_password(req: Request) -> Any:
+    """自分のパスワードを変更する（current_password, new_password）"""
+    data = req.json()
+    auth.change_password(req.ctx, _self(req), data.get("current_password"), data.get("new_password"))
+    return {"ok": True}
+
+
+@r("GET", "/api/auth/tokens")
+def auth_tokens(req: Request) -> Any:
+    """自分の API トークンの一覧（REST API・MCP・A2A 用）"""
+    return auth.list_tokens(req.ctx, _self(req).user_id)  # type: ignore[arg-type]
+
+
+@r("POST", "/api/auth/tokens")
+def auth_token_create(req: Request) -> Any:
+    """API トークンを発行する（平文は発行時にだけ返す）"""
+    return auth.create_token(req.ctx, _self(req), req.json().get("name"))
+
+
+@r("DELETE", "/api/auth/tokens/{id:int}")
+def auth_token_delete(req: Request) -> Any:
+    """API トークンを失効させる"""
+    auth.delete_token(req.ctx, _self(req), req.params["id"])
+    return {"ok": True}
+
+
+@r("GET", "/api/users")
+def users_list(req: Request) -> Any:
+    """アカウントの一覧（管理者）"""
+    _require(req)
+    return auth.list_users(req.ctx)
+
+
+@r("POST", "/api/users")
+def users_create(req: Request) -> Any:
+    """アカウントを作成する（管理者。login, password, role, display_name）"""
+    _require(req)
+    return auth.create_user(req.ctx, req.json())
+
+
+@r("PUT", "/api/users/{id:int}")
+def users_update(req: Request) -> Any:
+    """アカウントを更新する（管理者。display_name, role, disabled, password の再設定）"""
+    _require(req)
+    return auth.update_user(req.ctx, req.params["id"], req.json(), req.principal)
+
+
+@r("DELETE", "/api/users/{id:int}")
+def users_delete(req: Request) -> Any:
+    """アカウントを削除する（管理者）"""
+    _require(req)
+    auth.delete_user(req.ctx, req.params["id"], req.principal)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- メタ
 
 @r("GET", "/api")
@@ -59,6 +174,7 @@ def api_catalog(req: Request) -> Any:
 def meta(req: Request) -> Any:
     return {
         "user": req.ctx.actor,
+        "role": req.principal.role if req.principal else None,
         "version": req.app.version,
         "status_labels": param_state.STATUS_LABELS,
         "item_status_labels": items.STATUS_LABELS,
@@ -185,6 +301,8 @@ def params_delete(req: Request) -> Any:
 @r("POST", "/api/params/{id:int}/transition")
 def params_transition(req: Request) -> Any:
     data = req.json()
+    if data.get("action") in _APPROVER_ACTIONS:
+        _require(req, "approver")
     return param_state.transition(req.ctx, req.params["id"], data.get("action") or "", data.get("comment") or "", data.get("row_version"))
 
 
@@ -192,6 +310,8 @@ def params_transition(req: Request) -> Any:
 def params_bulk_transition(req: Request) -> Any:
     """複数パラメータへの一括操作。失敗したものは理由を返す。"""
     data = req.json()
+    if data.get("action") in _APPROVER_ACTIONS:
+        _require(req, "approver")
     ok, failed = [], []
     for pid in _int_list(data.get("param_ids"), "param_ids"):
         try:
@@ -255,6 +375,8 @@ def items_delete(req: Request) -> Any:
 def items_transition(req: Request) -> Any:
     """構成項目の状態遷移（request_review / approve / reject / withdraw）"""
     data = req.json()
+    if data.get("action") in _APPROVER_ACTIONS:
+        _require(req, "approver")
     return items.transition(req.ctx, req.params["id"], data.get("action") or "", data.get("comment") or "", data.get("row_version"))
 
 
@@ -384,11 +506,13 @@ def baselines_get(req: Request) -> Any:
 
 @r("POST", "/api/baselines/{id:int}/approve")
 def baselines_approve(req: Request) -> Any:
+    _require(req, "approver")
     return baseline.approve_baseline(req.ctx, req.params["id"], req.json().get("comment") or "")
 
 
 @r("POST", "/api/baselines/{id:int}/reject")
 def baselines_reject(req: Request) -> Any:
+    _require(req, "approver")
     return baseline.reject_baseline(req.ctx, req.params["id"], req.json().get("comment") or "")
 
 
@@ -493,6 +617,7 @@ def llm_get(req: Request) -> Any:
 
 @r("PUT", "/api/settings/llm")
 def llm_put(req: Request) -> Any:
+    _require(req)
     return jobs.put_settings(req.ctx, req.app.config.llm, req.json())
 
 

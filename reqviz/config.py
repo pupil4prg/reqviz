@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -32,6 +33,18 @@ class Config:
     public_url: str = ""  # Agent Card に載せる外向きの URL。空ならリクエストの Host から決める
     allowed_origins: tuple[str, ...] = ()  # /mcp・/a2a で追加で許可する Origin
     agent_endpoints: bool = True  # /mcp・/a2a・Agent Card を公開するか
+    auth_enabled: bool = True  # ログイン認証を行うか
+    admin_user: str = "admin"  # アカウントが 1 件もないときに作る最初の管理者
+    admin_password: str = ""  # 空なら自動生成して起動時に表示する
+    session_hours: float = 12.0
+    cookie_secure: bool = False  # HTTPS で公開する場合に on（Cookie に Secure を付ける）
+
+
+def _flag(e: Any, name: str, default: bool) -> bool:
+    v = e.get(name)
+    if v is None or v == "":
+        return default
+    return v.lower() not in ("off", "0", "false", "no")
 
 
 def load(env: dict[str, str] | None = None) -> Config:
@@ -44,7 +57,12 @@ def load(env: dict[str, str] | None = None) -> Config:
         templates_dir=Path(e.get("REQVIZ_TEMPLATES_DIR", str(ROOT / "templates"))),
         public_url=e.get("REQVIZ_PUBLIC_URL", "").rstrip("/"),
         allowed_origins=tuple(o.strip().rstrip("/") for o in e.get("REQVIZ_ALLOWED_ORIGINS", "").split(",") if o.strip()),
-        agent_endpoints=e.get("REQVIZ_AGENT_ENDPOINTS", "on").lower() not in ("off", "0", "false", "no"),
+        agent_endpoints=_flag(e, "REQVIZ_AGENT_ENDPOINTS", True),
+        auth_enabled=_flag(e, "REQVIZ_AUTH", True),
+        admin_user=e.get("REQVIZ_ADMIN_USER", "admin"),
+        admin_password=e.get("REQVIZ_ADMIN_PASSWORD", ""),
+        session_hours=float(e.get("REQVIZ_SESSION_HOURS", "12")),
+        cookie_secure=_flag(e, "REQVIZ_COOKIE_SECURE", False),
         llm=LLMConfig(
             base_url=e.get("REQVIZ_LLM_BASE_URL", "").rstrip("/"),
             model=e.get("REQVIZ_LLM_MODEL", ""),

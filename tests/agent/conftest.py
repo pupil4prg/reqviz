@@ -58,7 +58,7 @@ def fake_llm():
 
 
 def _serve(tmp_path, llm=None):
-    cfg = Config(host="127.0.0.1", port=0, db_path=tmp_path / "agent.db", templates_dir=ROOT / "templates",
+    cfg = Config(host="127.0.0.1", port=0, db_path=tmp_path / "agent.db", templates_dir=ROOT / "templates", auth_enabled=False,
                  llm=llm or LLMConfig())
     srv = make_server(cfg, run_ai_in_thread=False)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
