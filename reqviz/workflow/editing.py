@@ -17,10 +17,11 @@ from ..repo import model as repo
 RULE_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}$")
 
 PARAM_SNAPSHOT_FIELDS = (
-    "ref", "name", "aliases", "type", "enum_options", "value", "unit", "source",
+    "ref", "name", "aliases", "tags", "type", "enum_options", "value", "unit", "source",
     "rationale", "ref_doc", "owner", "status",
 )
 MAX_ALIASES = 20
+MAX_TAGS = 20
 RULE_SNAPSHOT_FIELDS = ("key", "kind", "target", "expression", "nl_text", "severity", "description", "enabled")
 
 
@@ -73,6 +74,33 @@ def normalize_aliases(value: Any) -> list[dict[str, str]]:
             out.append({"label": key[0], "value": key[1]})
     if len(out) > MAX_ALIASES:
         raise Invalid(f"別名が多すぎます（最大 {MAX_ALIASES} 件）")
+    return out
+
+
+def normalize_tags(value: Any) -> list[str]:
+    """タグの一覧を正規化する（前後の空白を除き、大文字小文字だけが違う重複は最初のものに寄せる）。
+
+    カンマ区切りの文字列も受け付ける。
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = value.replace("、", ",").split(",")
+    if not isinstance(value, list) or not all(isinstance(t, str) for t in value):
+        raise Invalid("タグは文字列の配列で指定してください")
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in value:
+        t = t.strip()
+        if not t:
+            continue
+        if len(t) > 32 or any(c in t for c in ",、\n\r\t"):
+            raise Invalid(f"タグは 32 文字以内で、カンマや改行を含めずに指定してください: {t[:40]!r}")
+        if t.casefold() not in seen:
+            seen.add(t.casefold())
+            out.append(t)
+    if len(out) > MAX_TAGS:
+        raise Invalid(f"タグが多すぎます（最大 {MAX_TAGS} 件）")
     return out
 
 
@@ -282,6 +310,8 @@ def _param_fields(ctx: Ctx, system_id: int, data: dict[str, Any], current: dict[
         fields["name"] = require_text(data, "name", "パラメータ名")
     if "aliases" in data or current is None:
         fields["aliases"] = dumps(normalize_aliases(data.get("aliases")))
+    if "tags" in data or current is None:
+        fields["tags"] = dumps(normalize_tags(data.get("tags")))
     ptype = data.get("type", cur.get("type", "number"))
     if ptype not in PARAM_TYPES:
         raise Invalid(f"型が不正です: {ptype}")

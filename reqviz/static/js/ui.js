@@ -126,6 +126,20 @@ export function fmtValue(v) {
   return String(v);
 }
 
+/** タグの一覧。onClick を渡すと、クリックで絞り込みなどに使える */
+export function tagChips(tags, onClick, active) {
+  if (!tags || !tags.length) return null;
+  return h("span", { class: "tags" }, tags.map((t) => h("span", {
+    class: `tag ${onClick ? "clickable" : ""} ${active && active.has(t) ? "active" : ""}`,
+    onclick: onClick ? (ev) => { ev.preventDefault(); ev.stopPropagation(); onClick(t); } : undefined,
+  }, t)));
+}
+
+/** カンマ（または読点）区切りの入力をタグの配列にする */
+export function parseTags(text) {
+  return text.split(/[,、]/).map((x) => x.trim()).filter(Boolean);
+}
+
 /** 別名の一覧を「種類: 名前」の小さな表示にする */
 export function aliasList(aliases) {
   if (!aliases || !aliases.length) return null;
@@ -136,7 +150,7 @@ export function aliasList(aliases) {
 /** 文字列 t（小文字）が、パラメータの参照名・名前・別名・根拠のどれかに含まれるか */
 export function paramMatches(n, t) {
   if (!t) return true;
-  return [n.ref, n.name, n.rationale, ...(n.aliases || []).map((a) => a.value)].some((v) => v && v.toLowerCase().includes(t));
+  return [n.ref, n.name, n.rationale, ...(n.aliases || []).map((a) => a.value), ...(n.tags || [])].some((v) => v && v.toLowerCase().includes(t));
 }
 
 /** 任意の値を 1 行で表示する（オブジェクト・配列は JSON、長いものは省略） */

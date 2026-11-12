@@ -127,7 +127,7 @@ export async function render(root, { sid, query }) {
   function renderToolbar() {
     const stale = graph.nodes.filter((n) => n.flag_stale).length;
     const proposals = graph.nodes.filter((n) => n.has_proposal).length;
-    const search = h("input", { type: "search", placeholder: "検索（名前・参照名・別名）", value: canvas.filter.text, style: { width: "180px" } });
+    const search = h("input", { type: "search", placeholder: "検索（名前・参照名・別名・タグ）", value: canvas.filter.text, style: { width: "180px" } });
     search.addEventListener("input", () => { canvas.filter.text = search.value; canvas.draw(); });
     search.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
@@ -136,6 +136,10 @@ export async function render(root, { sid, query }) {
     });
     const layerSel = h("select", {}, h("option", { value: "" }, "全レイヤー"), graph.layers.map((l) => h("option", { value: l.key, selected: canvas.filter.layer === l.key }, l.name)));
     layerSel.addEventListener("change", () => { canvas.filter.layer = layerSel.value; canvas.draw(); });
+    const tagNames = [...new Set(graph.nodes.flatMap((n) => n.tags))].sort((a, b) => a.localeCompare(b, "ja"));
+    if (canvas.filter.tag && !tagNames.includes(canvas.filter.tag)) canvas.filter.tag = "";
+    const tagSel = h("select", { title: "タグで絞り込む" }, h("option", { value: "" }, "全タグ"), tagNames.map((t) => h("option", { value: t, selected: canvas.filter.tag === t }, t)));
+    tagSel.addEventListener("change", () => { canvas.filter.tag = tagSel.value; canvas.draw(); });
 
     const aiSel = h("select", { title: "AI 支援（対象: 全パラメータ）" }, h("option", { value: "" }, "AI 支援…"),
       Object.entries(PURPOSE_LABELS).map(([k, v]) => h("option", { value: k }, v)));
@@ -164,7 +168,7 @@ export async function render(root, { sid, query }) {
       h("button", { onclick: recalcStale, disabled: !stale, title: "要再計算のパラメータとその下流の再計算案を作成します" }, `⟳ 再計算${stale ? `（${stale}）` : ""}`),
       h("button", { onclick: reviewProposals, disabled: !proposals }, `再計算案を適用${proposals ? `（${proposals}）` : ""}`),
       h("span", { class: "sep" }),
-      search, layerSel, diffToggle,
+      search, layerSel, tagNames.length ? tagSel : null, diffToggle,
       h("span", { class: "spacer" }),
       aiSel, exportSel,
       h("button", { class: "small", title: "ドラッグした位置を初期配置に戻します", onclick: () => { canvas.resetLayout(); canvas.fit(); } }, "配置をリセット"),

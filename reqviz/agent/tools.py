@@ -149,6 +149,7 @@ _ALIAS = {
 }
 _PARAM_BODY = {
     "name": _s("表示名"),
+    "tags": _arr("タグ（例: 開発中、要確認）。指定すると全体を置き換える。一部だけ付け外しするなら apply_tags"),
     "aliases": _arr("別名の一覧。実装上のパラメータ名や論理名など（指定すると全体を置き換える）", _ALIAS),
     "type": _s("型", enum=["number", "string", "enum", "bool"]),
     "enum_options": _arr("type=enum のときの選択肢"),
@@ -202,6 +203,15 @@ TOOLS: list[Tool] = [
     Tool("get_param_by_ref", "参照名でパラメータを取得する。" + REF_HELP, "GET", "/api/systems/{system_id}/params/by-ref/{ref}", {**SID, "ref": _s("参照名")}),
     Tool("lookup_params", "名前からパラメータを引く。参照名・キー・表示名・別名（実装上のパラメータ名など）のいずれかに完全一致するものをすべて返す",
          "GET", "/api/systems/{system_id}/params/lookup", {**SID, "name": _s("探す名前（例: max_connections）")}, required=("name",), query=("name",)),
+    Tool("search", "パラメータと構成項目を横断して検索する。q は空白区切りの語をすべて含むもの（参照名・名前・別名・値・根拠・タグ・選択肢・本文が対象）", "GET",
+         "/api/systems/{system_id}/search",
+         {**SID, "q": _s("検索語（空白区切りで AND）"), "tags": _s("タグで絞り込む（カンマ区切り）"),
+          "tag_mode": _s("タグの条件。all = すべて付いている、any = いずれかが付いている", enum=["all", "any"]),
+          "kind": _s("種類で絞り込む", enum=["param", "item", "choice", "document"]),
+          "status": _s("承認の状態、または stale（要再計算）", enum=["draft", "ai_evaluated", "in_review", "approved", "stale"]),
+          "layer": _s("レイヤーキーで絞り込む"), "limit": _i("件数（既定 200）")},
+         query=("q", "tags", "tag_mode", "kind", "status", "layer", "limit")),
+    Tool("list_tags", "使われているタグと、付いているパラメータ・構成項目の件数", "GET", "/api/systems/{system_id}/tags", {**SID}),
     Tool("list_items", "構成項目の一覧。choice = 実装方式などの選択肢（列挙データ）、document = 不定形データ", "GET",
          "/api/systems/{system_id}/items", {**SID, "kind": _s("種別で絞り込む", enum=["choice", "document"])}, query=("kind",)),
     Tool("get_item", "構成項目 1 件の詳細（版の系列つき）", "GET", "/api/items/{item_id}", {"item_id": _i("構成項目 ID")}),
@@ -275,6 +285,13 @@ TOOLS: list[Tool] = [
     Tool("transition_item", "構成項目の状態遷移（下書き→レビュー中→承認済み）", "POST", "/api/items/{item_id}/transition",
          {"item_id": _i("構成項目 ID"), "action": _s("操作", enum=["request_review", "approve", "reject", "withdraw"]),
           "comment": _s("コメント（reject では必須）")}, required=("action",), read_only=False),
+
+    # ---- タグ
+    Tool("apply_tags", "複数のパラメータ・構成項目に、タグをまとめて付け外しする（「開発中」を外して「確定」を付ける、など）。承認状態は変わらない", "POST",
+         "/api/systems/{system_id}/tags/apply",
+         {**SID, "refs": _arr("対象の参照名"), "add": _arr("付けるタグ"), "remove": _arr("外すタグ"), **COMMENT}, required=("refs",), read_only=False),
+    Tool("rename_tag", "タグの名前をシステム全体で変更する", "POST", "/api/systems/{system_id}/tags/rename",
+         {**SID, "from": _s("変更前のタグ"), "to": _s("変更後のタグ"), **COMMENT}, required=("from", "to"), read_only=False),
 
     # ---- ルール・関連
     Tool("create_rule", "ルールを作成する", "POST", "/api/systems/{system_id}/rules",

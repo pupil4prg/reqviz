@@ -167,7 +167,7 @@ def _item_fields(ctx: Ctx, system_id: int, data: dict[str, Any], current: dict[s
             raise Invalid("不定形データに選択肢（options / selected）は指定できません")
 
     if "tags" in data or current is None:
-        fields["tags"] = dumps(_str_list(data.get("tags"), "タグ"))
+        fields["tags"] = dumps(editing.normalize_tags(data.get("tags")))
     for f in ("rationale", "ref_doc", "owner"):
         if f in data or current is None:
             v = data.get(f) or ""

@@ -230,3 +230,27 @@ def test_aliases_api(server):
     assert call(server, "GET", f"/api/systems/{sid}/params/lookup?name=zzz")[1] == []
     assert call(server, "GET", f"/api/systems/{sid}/params/lookup")[0] == 400
     assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][0]["aliases"] == []
+
+
+def test_tags_and_search_api(server):
+    from urllib.parse import quote
+    tpl = call(server, "GET", "/api/templates")[1][0]
+    sid = call(server, "POST", "/api/systems", {"name": "T", "template_id": tpl["id"]})[1]["id"]
+    p = call(server, "GET", f"/api/systems/{sid}/params/by-ref/db.max_connections")[1]
+    assert call(server, "PUT", f"/api/params/{p['id']}", {"tags": ["開発中"]})[1]["tags"] == ["開発中"]
+    st, res, _ = call(server, "POST", f"/api/systems/{sid}/tags/apply", {"refs": ["db.max_connections", "os.max_open_files"], "add": ["要確認"]})
+    assert st == 200 and res["updated"] == ["db.max_connections", "os.max_open_files"]
+    assert call(server, "POST", f"/api/systems/{sid}/tags/apply", {"refs": ["x.y"], "add": ["a"]})[0] == 422
+    assert call(server, "POST", f"/api/systems/{sid}/tags/apply", {"refs": "db.max_connections", "add": ["a"]})[0] == 400
+    assert call(server, "GET", f"/api/systems/{sid}/tags")[1] == [
+        {"tag": "要確認", "params": 2, "items": 0}, {"tag": "開発中", "params": 1, "items": 0}]
+
+    st, r, _ = call(server, "GET", f"/api/systems/{sid}/search?tags={quote('要確認,開発中')}")
+    assert [x["ref"] for x in r["results"]] == ["db.max_connections"]
+    st, r, _ = call(server, "GET", f"/api/systems/{sid}/search?tags={quote('要確認,開発中')}&tag_mode=any&q=nofile")
+    assert [x["ref"] for x in r["results"]] == ["os.max_open_files"] and r["total"] == 1
+    assert call(server, "GET", f"/api/systems/{sid}/search?kind=bogus")[0] == 422
+    assert call(server, "GET", f"/api/systems/{sid}/search?limit=x")[0] == 400
+
+    assert call(server, "POST", f"/api/systems/{sid}/tags/rename", {"from": "要確認", "to": "確認済み"})[1]["updated"] == ["db.max_connections", "os.max_open_files"]
+    assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][0]["tags"] == []
