@@ -13,10 +13,12 @@ export async function render(root, { sid }) {
   const page = h("div", { class: "page" });
   root.append(page);
   let layers = [];
+  let comps = [];
 
   async function load() {
-    const [ls, items] = await Promise.all([api.get(`/api/systems/${sid}/layers`), api.get(`/api/systems/${sid}/items`)]);
+    const [ls, items, cs] = await Promise.all([api.get(`/api/systems/${sid}/layers`), api.get(`/api/systems/${sid}/items`), api.get(`/api/systems/${sid}/components`)]);
     layers = ls;
+    comps = cs;
     refreshNav(sid);
     const choices = items.filter((i) => i.kind === "choice");
     const docs = items.filter((i) => i.kind === "document");
@@ -55,7 +57,7 @@ export async function render(root, { sid }) {
   function foot(i) {
     return h("div", { class: "small muted", style: { marginTop: "6px" } },
       i.rationale ? h("div", {}, "根拠: ", i.rationale) : null,
-      [i.ref_doc ? `出典: ${i.ref_doc}` : "", i.owner ? `担当: ${i.owner}` : "", `更新: ${fmtTime(i.updated_at)}`].filter(Boolean).join(" ／ "));
+      [i.component ? `コンポーネント: ${i.component_name}` : "", i.ref_doc ? `出典: ${i.ref_doc}` : "", i.owner ? `担当: ${i.owner}` : "", `更新: ${fmtTime(i.updated_at)}`].filter(Boolean).join(" ／ "));
   }
 
   function choiceCard(i) {
@@ -133,6 +135,7 @@ export async function render(root, { sid }) {
     const refDoc = h("input", { value: i ? i.ref_doc : "" });
     const owner = h("input", { value: i ? i.owner : "" });
     const comment = h("input", { placeholder: "変更理由（履歴に残ります）" });
+    const comp = h("select", {}, h("option", { value: "" }, "（未設定）"), comps.map((c) => h("option", { value: c.key, selected: i && i.component === c.key }, c.name)));
 
     const radioName = `sel-${Date.now()}`;
     const blank = { key: "", label: "", description: "", pros: [], cons: [], attributes: {} };
@@ -158,7 +161,7 @@ export async function render(root, { sid }) {
         specific,
         h("label", { class: "field" }, kind === "choice" ? "選定理由" : "根拠", rationale),
         h("div", { class: "grid2" }, h("label", { class: "field" }, "出典", refDoc), h("label", { class: "field" }, "担当", owner)),
-        h("label", { class: "field" }, "タグ", tags),
+        h("div", { class: "grid2" }, h("label", { class: "field" }, "タグ", tags), comps.length ? h("label", { class: "field" }, "コンポーネント", comp) : h("span")),
         i ? h("label", { class: "field" }, "変更理由", comment) : null,
         i && i.status !== "draft" ? h("div", { class: "alert warn small" }, "内容（選択肢・採用案・本文）を変更すると、下書きに戻ります。") : null,
       ],
@@ -169,6 +172,7 @@ export async function render(root, { sid }) {
             layer_id: Number(layerSel.value), key: key.value.trim(), name: name.value, kind,
             tags: parseTags(tags.value),
             rationale: rationale.value, ref_doc: refDoc.value, owner: owner.value, comment: comment.value,
+            ...(comps.length ? { component: comp.value || null } : {}),
           };
           if (kind === "choice") {
             data.selected = null;

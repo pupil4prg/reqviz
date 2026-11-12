@@ -254,3 +254,33 @@ def test_tags_and_search_api(server):
 
     assert call(server, "POST", f"/api/systems/{sid}/tags/rename", {"from": "要確認", "to": "確認済み"})[1]["updated"] == ["db.max_connections", "os.max_open_files"]
     assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][0]["tags"] == []
+
+
+def test_components_api(server):
+    tpl = call(server, "GET", "/api/templates")[1][0]
+    sid = call(server, "POST", "/api/systems", {"name": "C", "template_id": tpl["id"]})[1]["id"]
+    st, mw, _ = call(server, "POST", f"/api/systems/{sid}/components", {"key": "mw", "name": "ミドルウェア", "kind": "MW"})
+    st, os_, _ = call(server, "POST", f"/api/systems/{sid}/components", {"key": "os", "name": "OS"})
+    assert st == 200 and call(server, "POST", f"/api/systems/{sid}/components", {"key": "os", "name": "x"})[0] == 422
+    assert call(server, "PUT", f"/api/components/{mw['id']}", {"description": "AP と DB"})[1]["description"] == "AP と DB"
+    assert call(server, "GET", f"/api/components/{mw['id']}")[1]["key"] == "mw"
+
+    st, res, _ = call(server, "POST", f"/api/systems/{sid}/components/assign", {"refs": ["db.max_connections", "db.pool_per_server"], "component": "mw"})
+    assert res["updated"] == ["db.max_connections", "db.pool_per_server"]
+    p = call(server, "GET", f"/api/systems/{sid}/params/by-ref/os.max_open_files")[1]
+    assert call(server, "PUT", f"/api/params/{p['id']}", {"component": "os"})[1]["component_name"] == "OS"
+    assert [c["param_count"] for c in call(server, "GET", f"/api/systems/{sid}/components")[1]] == [2, 1]
+
+    st, dep, _ = call(server, "POST", f"/api/systems/{sid}/component-deps", {"from": "mw", "to": "os", "note": "波及", "notify": True})
+    assert st == 200 and dep["notify"] is True
+    assert call(server, "POST", f"/api/systems/{sid}/component-deps", {"from": "mw", "to": "mw"})[0] == 422
+    assert call(server, "PUT", f"/api/component-deps/{dep['id']}", {"notify": False})[1]["notify"] is False
+    st, a, _ = call(server, "GET", f"/api/systems/{sid}/components/analysis")
+    assert a["deps"][0]["supported"] is True and a["deps"][0]["links"][0]["rule_key"] == "C-003"
+    assert a["components"][0]["downstream"] == ["os"] and len(a["unassigned"]["params"]) == 11
+    assert len(call(server, "GET", f"/api/systems/{sid}/component-deps")[1]) == 1
+    assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][-1]["component"] == "os"
+
+    assert call(server, "DELETE", f"/api/component-deps/{dep['id']}")[1] == {"ok": True}
+    assert call(server, "DELETE", f"/api/components/{os_['id']}")[1] == {"ok": True}
+    assert call(server, "GET", f"/api/params/{p['id']}")[1]["component"] is None

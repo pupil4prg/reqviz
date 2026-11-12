@@ -234,3 +234,20 @@ textarea.mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 1
 .tag.clickable:hover, .tag.active { border-color: var(--primary); }
 .tag.active { background: var(--primary); color: #fff; }
 .tag .count { opacity: .7; margin-left: 4px; }
+
+/* コンポーネントの依存関係図 */
+.comp-diagram { overflow: auto; }
+.comp-svg { display: block; }
+.comp-node rect { fill: var(--surface); stroke: var(--primary); stroke-width: 1.6; }
+.comp-node .name { font-size: 13.5px; font-weight: 600; fill: var(--text); }
+.comp-node .meta { font-size: 11.5px; fill: var(--muted); }
+.comp-edge { fill: none; stroke-width: 1.8; }
+.comp-edge.solid { stroke: var(--primary); }
+.comp-edge.notify { stroke: var(--stale); stroke-width: 2.4; }
+.comp-edge.weak { stroke: var(--muted); stroke-dasharray: 2 4; }
+.comp-edge.undeclared { stroke: var(--danger); stroke-dasharray: 6 4; }
+.arrow.solid { fill: var(--primary); } .arrow.notify { fill: var(--stale); } .arrow.weak { fill: var(--muted); } .arrow.undeclared { fill: var(--danger); }
+.legend-inline { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+.legend-inline .ln { display: inline-block; width: 26px; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+.ln.solid { border-color: var(--primary); } .ln.notify { border-color: var(--stale); border-top-width: 3px; }
+.ln.weak { border-color: var(--muted); border-top-style: dotted; } .ln.undeclared { border-color: var(--danger); border-top-style: dashed; }

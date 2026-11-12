@@ -14,6 +14,7 @@ import * as historyView from "./views/history.js";
 import * as aiView from "./views/ai.js";
 import * as settingsView from "./views/settings.js";
 import * as searchView from "./views/search.js";
+import * as componentsView from "./views/components.js";
 import * as loginView from "./views/login.js";
 import * as usersView from "./views/users.js";
 
@@ -24,6 +25,7 @@ const SYSTEM_TABS = [
   ["search", "検索", searchView],
   ["rules", "ルール", rulesView],
   ["layers", "レイヤー", layersView],
+  ["components", "コンポーネント", componentsView],
   ["approvals", "承認", approvalsView],
   ["baselines", "版管理", baselinesView],
   ["ai", "AI", aiView],

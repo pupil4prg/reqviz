@@ -27,7 +27,7 @@ KIND_LABELS = {"choice": "選択肢", "document": "不定形データ"}
 STATUS_LABELS = {"draft": "下書き", "in_review": "レビュー中", "approved": "承認済み"}
 
 ITEM_SNAPSHOT_FIELDS = (
-    "ref", "name", "kind", "options", "selected", "content_type", "content",
+    "ref", "name", "component", "kind", "options", "selected", "content_type", "content",
     "tags", "rationale", "ref_doc", "owner", "status",
 )
 # 変更すると承認をやり直す必要があるフィールド
@@ -168,6 +168,8 @@ def _item_fields(ctx: Ctx, system_id: int, data: dict[str, Any], current: dict[s
 
     if "tags" in data or current is None:
         fields["tags"] = dumps(editing.normalize_tags(data.get("tags")))
+    if "component" in data or "component_id" in data or current is None:
+        fields["component_id"] = editing.resolve_component(ctx, system_id, data)
     for f in ("rationale", "ref_doc", "owner"):
         if f in data or current is None:
             v = data.get(f) or ""

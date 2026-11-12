@@ -20,6 +20,7 @@ export async function render(root, { sid, query }) {
   root.append(page);
 
   let graph = null;
+  let comps = [];
   let selected = query.ref || null;
   let selectedKind = selected ? "param" : null;
 
@@ -41,7 +42,7 @@ export async function render(root, { sid, query }) {
   }
 
   async function reload() {
-    graph = await api.get(`/api/systems/${sid}/graph`);
+    [graph, comps] = await Promise.all([api.get(`/api/systems/${sid}/graph`), api.get(`/api/systems/${sid}/components`)]);
     canvas.selected = selectedKind === "param" ? selected : null;
     canvas.setData(graph);
     renderToolbar();
@@ -67,7 +68,7 @@ export async function render(root, { sid, query }) {
       if (selectedKind === "param") {
         const n = graph.nodes.find((x) => x.ref === selected);
         if (!n) { selected = null; selectedKind = null; return renderSide(); }
-        await renderParamPanel(side, n.id, { sid, graph, onChange, onTrace: trace });
+        await renderParamPanel(side, n.id, { sid, graph, onChange, onTrace: trace, comps });
       } else if (selectedKind === "rule") {
         renderRulePanel(graph.rule_nodes.find((r) => r.id === selected));
       } else {
@@ -140,6 +141,10 @@ export async function render(root, { sid, query }) {
     if (canvas.filter.tag && !tagNames.includes(canvas.filter.tag)) canvas.filter.tag = "";
     const tagSel = h("select", { title: "タグで絞り込む" }, h("option", { value: "" }, "全タグ"), tagNames.map((t) => h("option", { value: t, selected: canvas.filter.tag === t }, t)));
     tagSel.addEventListener("change", () => { canvas.filter.tag = tagSel.value; canvas.draw(); });
+    if (canvas.filter.component && !comps.some((c) => c.key === canvas.filter.component)) canvas.filter.component = "";
+    const compSel = h("select", { title: "コンポーネントで絞り込む" }, h("option", { value: "" }, "全コンポーネント"),
+      comps.map((c) => h("option", { value: c.key, selected: canvas.filter.component === c.key }, c.name)));
+    compSel.addEventListener("change", () => { canvas.filter.component = compSel.value; canvas.draw(); });
 
     const aiSel = h("select", { title: "AI 支援（対象: 全パラメータ）" }, h("option", { value: "" }, "AI 支援…"),
       Object.entries(PURPOSE_LABELS).map(([k, v]) => h("option", { value: k }, v)));
@@ -163,12 +168,12 @@ export async function render(root, { sid, query }) {
     applyChanges();
 
     fill(toolbar, 
-      h("button", { class: "primary", onclick: () => paramDialog(sid, graph.layers, null, onChange) }, "＋ パラメータ"),
+      h("button", { class: "primary", onclick: () => paramDialog(sid, graph.layers, null, onChange, comps) }, "＋ パラメータ"),
       h("span", { class: "sep" }),
       h("button", { onclick: recalcStale, disabled: !stale, title: "要再計算のパラメータとその下流の再計算案を作成します" }, `⟳ 再計算${stale ? `（${stale}）` : ""}`),
       h("button", { onclick: reviewProposals, disabled: !proposals }, `再計算案を適用${proposals ? `（${proposals}）` : ""}`),
       h("span", { class: "sep" }),
-      search, layerSel, tagNames.length ? tagSel : null, diffToggle,
+      search, layerSel, comps.length ? compSel : null, tagNames.length ? tagSel : null, diffToggle,
       h("span", { class: "spacer" }),
       aiSel, exportSel,
       h("button", { class: "small", title: "ドラッグした位置を初期配置に戻します", onclick: () => { canvas.resetLayout(); canvas.fit(); } }, "配置をリセット"),

@@ -15,7 +15,7 @@ from ..repo import history
 from ..repo import model as repo
 from ..router import Request, Response, Router
 from ..errors import NotFound
-from ..workflow import analysis, baseline, editing, items, param_state, snapshot, tagging, templates, versions
+from ..workflow import analysis, baseline, components, editing, items, param_state, snapshot, tagging, templates, versions
 
 router = Router()
 r = router.route
@@ -387,6 +387,77 @@ def items_transition(req: Request) -> Any:
     if data.get("action") in _APPROVER_ACTIONS:
         _require(req, "approver")
     return items.transition(req.ctx, req.params["id"], data.get("action") or "", data.get("comment") or "", data.get("row_version"))
+
+
+# ---------------------------------------------------------------- コンポーネントと依存関係
+
+@r("GET", "/api/systems/{sid:int}/components")
+def components_list(req: Request) -> Any:
+    """コンポーネントの一覧（所属するパラメータ・構成項目の件数つき）"""
+    return components.list_components(req.ctx, req.params["sid"])
+
+
+@r("POST", "/api/systems/{sid:int}/components")
+def components_create(req: Request) -> Any:
+    """コンポーネントを作成する（key, name, kind, description）"""
+    return components.create_component(req.ctx, req.params["sid"], req.json())
+
+
+@r("GET", "/api/systems/{sid:int}/components/analysis")
+def components_analysis(req: Request) -> Any:
+    """依存関係の分析（宣言した依存の裏付け、未宣言のつながり、未分類、循環、波及元・波及先）"""
+    return components.analysis(req.ctx, req.params["sid"])
+
+
+@r("POST", "/api/systems/{sid:int}/components/assign")
+def components_assign(req: Request) -> Any:
+    """複数のパラメータ・構成項目をコンポーネントに割り当てる（refs, component。component が空なら未分類）"""
+    data = req.json()
+    return components.assign(req.ctx, req.params["sid"], _str_list(data.get("refs"), "refs"), data.get("component"), data.get("comment") or "")
+
+
+@r("GET", "/api/components/{id:int}")
+def components_get(req: Request) -> Any:
+    """コンポーネント 1 件"""
+    return components.get_component(req.ctx, req.params["id"])
+
+
+@r("PUT", "/api/components/{id:int}")
+def components_update(req: Request) -> Any:
+    """コンポーネントを更新する"""
+    return components.update_component(req.ctx, req.params["id"], req.json())
+
+
+@r("DELETE", "/api/components/{id:int}")
+def components_delete(req: Request) -> Any:
+    """コンポーネントを削除する（所属していた項目は未分類に戻る）"""
+    components.delete_component(req.ctx, req.params["id"])
+    return {"ok": True}
+
+
+@r("GET", "/api/systems/{sid:int}/component-deps")
+def component_deps_list(req: Request) -> Any:
+    """コンポーネント間の依存関係の一覧（from の設計が to に波及する）"""
+    return components.list_deps(req.ctx, req.params["sid"])
+
+
+@r("POST", "/api/systems/{sid:int}/component-deps")
+def component_deps_create(req: Request) -> Any:
+    """依存関係を定義する（from, to, note, notify）"""
+    return components.create_dep(req.ctx, req.params["sid"], req.json())
+
+
+@r("PUT", "/api/component-deps/{id:int}")
+def component_deps_update(req: Request) -> Any:
+    """依存関係のメモと、変更を知らせるかどうか（notify）を更新する"""
+    return components.update_dep(req.ctx, req.params["id"], req.json())
+
+
+@r("DELETE", "/api/component-deps/{id:int}")
+def component_deps_delete(req: Request) -> Any:
+    """依存関係を削除する"""
+    components.delete_dep(req.ctx, req.params["id"])
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- タグ・検索

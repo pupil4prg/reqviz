@@ -3,7 +3,10 @@
 import { api } from "../api.js";
 import { confirmDialog, fmtAny, fmtTime, h, showError, toast, fill } from "../ui.js";
 
-const ENTITY_LABELS = { param: "パラメータ", item: "構成項目", rule: "ルール", layer: "レイヤー", relation: "関連", system: "システム全体" };
+const ENTITY_LABELS = {
+  param: "パラメータ", item: "構成項目", rule: "ルール", layer: "レイヤー", relation: "関連",
+  component: "コンポーネント", component_dep: "コンポーネントの依存", system: "システム全体",
+};
 const OP_LABELS = { create: "作成", update: "更新", delete: "削除", restore: "復元" };
 const SECTION_LABELS = { params: "パラメータ", items: "構成項目", rules: "ルール" };
 const CHANGE_LABELS = { added: "追加", removed: "削除", modified: "変更" };

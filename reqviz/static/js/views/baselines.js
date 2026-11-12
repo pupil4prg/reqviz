@@ -4,7 +4,7 @@ import { api } from "../api.js";
 import { refreshNav } from "../main.js";
 import { BASELINE_LABELS, confirmDialog, fmtTime, fmtValue, h, modal, promptComment, showError, toast, fill } from "../ui.js";
 
-const SECTION_LABELS = { params: "パラメータ", items: "構成項目", rules: "ルール", layers: "レイヤー", relations: "関連" };
+const SECTION_LABELS = { params: "パラメータ", items: "構成項目", components: "コンポーネント", component_deps: "コンポーネントの依存", rules: "ルール", layers: "レイヤー", relations: "関連" };
 const CHANGE_LABELS = { added: "追加", removed: "削除", modified: "変更" };
 
 export async function render(root, { sid }) {

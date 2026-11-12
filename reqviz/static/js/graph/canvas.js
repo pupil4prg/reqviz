@@ -43,7 +43,7 @@ export class GraphCanvas {
     this.highlight = null; // Set of ids or null
     this.selected = null;
     this.changed = new Set();
-    this.filter = { text: "", layer: "", tag: "" };
+    this.filter = { text: "", layer: "", tag: "", component: "" };
 
     this.svg = s("svg", { role: "img", "aria-label": "パラメータ関連図" });
     this.defs = s("defs", {},
@@ -99,6 +99,7 @@ export class GraphCanvas {
     const t = this.filter.text.trim().toLowerCase();
     if (this.filter.layer && n.layer_key !== this.filter.layer) return false;
     if (this.filter.tag && !(n.tags || []).includes(this.filter.tag)) return false;
+    if (this.filter.component && n.component !== this.filter.component) return false;
     if (!t) return true;
     return [n.ref, n.name, n.key, n.description, n.expression, ...(n.aliases || []).map((x) => x.value), ...(n.tags || [])].some((v) => v && String(v).toLowerCase().includes(t));
   }
@@ -125,7 +126,7 @@ export class GraphCanvas {
     const dimmed = (id) => (hl && !hl.has(id)) || this.filteredOut.has(id);
     this.filteredOut = new Set([...g.nodes.map((n) => [n.ref, n]), ...g.rule_nodes.map((r) => [r.id, r])]
       .filter(([, n]) => !this.matchesFilter(n)).map(([id]) => id));
-    const filtering = this.filter.text || this.filter.layer || this.filter.tag;
+    const filtering = this.filter.text || this.filter.layer || this.filter.tag || this.filter.component;
     if (!filtering) this.filteredOut.clear();
 
     // エッジ

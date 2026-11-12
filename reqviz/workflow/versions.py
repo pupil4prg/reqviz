@@ -178,6 +178,17 @@ def _layer_id(ctx: Ctx, system_id: int, ref: str) -> tuple[int, str]:
     return layer["id"], key
 
 
+def _restore_component(ctx: Ctx, system_id: int, target: dict[str, Any], data: dict[str, Any]) -> None:
+    """履歴に記録されたコンポーネントへの所属を戻す。記録がない・そのコンポーネントがもうない場合は現状を維持する。"""
+    if "component" not in target:
+        return
+    key = target["component"]
+    if key is None or ctx.conn.execute(
+        "SELECT 1 FROM components WHERE system_id = ? AND key = ?", (system_id, key)
+    ).fetchone():
+        data["component"] = key
+
+
 def restore_revision(ctx: Ctx, revision_id: int, comment: str = "") -> dict[str, Any]:
     """エンティティを、指定リビジョンの直後の内容に戻す（削除のリビジョンなら、削除前の内容で作り直す）。
 
@@ -202,6 +213,7 @@ def restore_revision(ctx: Ctx, revision_id: int, comment: str = "") -> dict[str,
             for extra in ("aliases", "tags"):  # 導入前に記録された履歴には含まれない（その場合は現状を維持）
                 if target.get(extra) is not None:
                     data[extra] = target[extra]
+            _restore_component(ctx, sid, target, data)
             data.update(layer_id=layer_id, key=pkey)
             cur = repo.params_by_ref(ctx, sid).get(key)
             result = editing.update_param(ctx, cur["id"], data, comment) if cur else editing.create_param(ctx, sid, data, comment)
@@ -212,6 +224,7 @@ def restore_revision(ctx: Ctx, revision_id: int, comment: str = "") -> dict[str,
             )
             data = {k: target.get(k) for k in fields}
             data.update(layer_id=layer_id, key=ikey, kind=target.get("kind"))
+            _restore_component(ctx, sid, target, data)
             cur = repo.items_by_ref(ctx, sid).get(key)
             result = items.update_item(ctx, cur["id"], data, comment) if cur else items.create_item(ctx, sid, data, comment)
         else:
