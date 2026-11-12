@@ -1,6 +1,6 @@
 // ルーター（ハッシュ方式）と画面の枠
 
-import { api, currentUser } from "./api.js";
+import { api, currentUser, setCsrfToken } from "./api.js";
 import { clear, h, showError, fill } from "./ui.js";
 import * as systemsView from "./views/systems.js";
 import * as graphView from "./views/graph-view.js";
@@ -13,6 +13,8 @@ import * as baselinesView from "./views/baselines.js";
 import * as historyView from "./views/history.js";
 import * as aiView from "./views/ai.js";
 import * as settingsView from "./views/settings.js";
+import * as loginView from "./views/login.js";
+import * as usersView from "./views/users.js";
 
 const SYSTEM_TABS = [
   ["graph", "関連図", graphView],
@@ -27,7 +29,36 @@ const SYSTEM_TABS = [
 ];
 
 let cleanup = null;
-export const app = { meta: null, system: null };
+export const app = { meta: null, system: null, auth: { auth_enabled: false, user: null, roles: {} } };
+
+/** ログインが必要な状態か（未ログイン、または初期パスワードの変更待ち） */
+function needsLogin() {
+  const a = app.auth;
+  return a.auth_enabled && (!a.user || a.user.must_change_password);
+}
+
+/** サーバーのログイン状態を取り直し、上部バーの表示を合わせる */
+export async function refreshAuth() {
+  app.auth = await api.get("/api/auth/me");
+  setCsrfToken(app.auth.csrf_token);
+  const { auth_enabled: enabled, user } = app.auth;
+  const ready = !needsLogin();
+  app.meta = ready ? await api.get("/api/meta") : null;
+  const badge = document.getElementById("user-badge");
+  badge.textContent = enabled ? (user && ready ? user.display_name : "") : (currentUser() || (app.meta && app.meta.user) || "");
+  badge.title = enabled && user ? `${user.login}（${app.auth.roles[user.role] || user.role}）` : "操作者（設定で変更）";
+  badge.hidden = !badge.textContent;
+  document.getElementById("logout-btn").hidden = !(enabled && user);
+  document.getElementById("settings-link").hidden = !ready;
+  document.getElementById("users-link").hidden = !(ready && enabled && user && user.role === "admin");
+}
+
+async function logout() {
+  try { await api.post("/api/auth/logout"); } catch { /* セッションが既に切れている */ }
+  app.meta = null;
+  await refreshAuth();
+  route();
+}
 
 function parseHash() {
   const raw = location.hash.replace(/^#/, "") || "/";
@@ -61,9 +92,16 @@ async function route() {
   if (cleanup) { try { cleanup(); } catch { /* noop */ } cleanup = null; }
   const root = clear(document.getElementById("app"));
   const { parts, query } = parseHash();
-  document.getElementById("user-badge").textContent = currentUser() || (app.meta && app.meta.user) || "";
   try {
-    if (parts[0] === "s" && parts[1]) {
+    if (needsLogin()) {
+      refreshNav(null);
+      document.title = "ログイン - 要件パラメータ可視化";
+      loginView.render(root, { user: app.auth.user, onDone: async () => { await refreshAuth(); route(); } });
+    } else if (parts[0] === "users" && app.auth.auth_enabled && app.auth.user.role === "admin") {
+      refreshNav(null);
+      cleanup = (await usersView.render(root, { query })) || null;
+      document.title = "ユーザー管理 - 要件パラメータ可視化";
+    } else if (parts[0] === "s" && parts[1]) {
       const sid = Number(parts[1]);
       const tab = parts[2] || "graph";
       const entry = SYSTEM_TABS.find(([k]) => k === tab) || SYSTEM_TABS[0];
@@ -87,8 +125,16 @@ async function route() {
 }
 
 async function init() {
-  try { app.meta = await api.get("/api/meta"); } catch (e) { showError(e); }
+  try { await refreshAuth(); } catch (e) { showError(e); }
   window.addEventListener("hashchange", route);
+  // セッション切れなどで API が 401 を返したら、ログイン画面に戻す
+  let handling = false;
+  window.addEventListener("reqviz:auth-required", async () => {
+    if (handling) return;
+    handling = true;
+    try { await refreshAuth(); route(); } catch (e) { showError(e); } finally { handling = false; }
+  });
+  document.getElementById("logout-btn").addEventListener("click", logout);
   route();
 }
 

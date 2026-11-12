@@ -210,3 +210,11 @@ tr.selected-option td { background: color-mix(in srgb, var(--ok) 9%, transparent
 .options-edit textarea { min-height: 54px; min-width: 150px; font-size: 12.5px; }
 .options-edit input[type=radio] { width: auto; }
 textarea.mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 12.5px; }
+
+/* ログイン */
+[hidden] { display: none !important; }
+.login-page { display: flex; justify-content: center; padding: 9vh 16px 40px; }
+.login-box { width: 100%; max-width: 380px; padding: 26px 28px 22px; }
+.login-box h1 { margin: 0 0 14px; font-size: 20px; }
+.login-box input { width: 100%; }
+.token-once { background: var(--surface-2); border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: 12.5px; word-break: break-all; user-select: all; }

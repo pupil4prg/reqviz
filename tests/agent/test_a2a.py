@@ -226,7 +226,7 @@ def test_return_immediately(tmp_path):
 
     from ..conftest import ROOT
 
-    srv = make_server(Config(host="127.0.0.1", port=0, db_path=tmp_path / "t.db", templates_dir=ROOT / "templates", llm=LLMConfig()))
+    srv = make_server(Config(host="127.0.0.1", port=0, db_path=tmp_path / "t.db", templates_dir=ROOT / "templates", auth_enabled=False, llm=LLMConfig()))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:

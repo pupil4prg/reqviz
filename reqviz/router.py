@@ -19,6 +19,7 @@ class Request:
     query: dict[str, str] = field(default_factory=dict)
     body: Any = None
     app: Any = None
+    principal: Any = None  # 認証済みの利用者（auth.Principal）。認証が無効なら None
 
     def json(self) -> dict[str, Any]:
         if self.body is None:

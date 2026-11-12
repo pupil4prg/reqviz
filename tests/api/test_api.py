@@ -13,7 +13,7 @@ from ..conftest import ROOT
 
 @pytest.fixture
 def server(tmp_path):
-    cfg = Config(host="127.0.0.1", port=0, db_path=tmp_path / "api.db", templates_dir=ROOT / "templates",
+    cfg = Config(host="127.0.0.1", port=0, db_path=tmp_path / "api.db", templates_dir=ROOT / "templates", auth_enabled=False,
                  llm=LLMConfig())
     srv = make_server(cfg, run_ai_in_thread=False)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
