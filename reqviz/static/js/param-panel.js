@@ -4,7 +4,7 @@ import { api } from "./api.js";
 import { startAi } from "./ai-run.js";
 import { paramDialog } from "./views/params.js";
 import {
-  aliasList, confirmDialog, flagBadges, fmtTime, fmtValue, h, KIND_LABELS, promptComment, readValue, showError,
+  aliasList, confirmDialog, flagBadges, parseTags, tagChips, fmtTime, fmtValue, h, KIND_LABELS, promptComment, readValue, showError,
   SOURCE_LABELS, statusBadge, STATUS_LABELS, toast, TYPE_LABELS, valueInput,
   fill,
 } from "./ui.js";
@@ -31,12 +31,13 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
   const refDocEl = h("input", { value: p.ref_doc, placeholder: "例: 非機能要件定義書 3.2" });
   const ownerEl = h("input", { value: p.owner });
   const commentEl = h("input", { placeholder: "変更理由（履歴に残ります・任意）" });
+  const tagsEl = h("input", { value: p.tags.join(", "), placeholder: "カンマ区切り（例: 開発中, 要確認）" });
 
   async function save() {
     try {
       const body = {
         value: readValue(p, valEl), unit: unitEl.value, rationale: rationaleEl.value, ref_doc: refDocEl.value,
-        owner: ownerEl.value, row_version: p.row_version, comment: commentEl.value,
+        owner: ownerEl.value, tags: parseTags(tagsEl.value), row_version: p.row_version, comment: commentEl.value,
       };
       const after = await api.put(`/api/params/${p.id}`, body);
       toast(after.status !== p.status ? `保存しました（値の変更により${STATUS_LABELS[after.status]}に戻りました）` : "保存しました");
@@ -85,6 +86,7 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
     h("h2", {}, p.name),
     h("div", { class: "row" }, h("code", {}, p.ref), statusBadge(p.status), flagBadges({ ...p, violation: node.violation })),
     aliasList(p.aliases),
+    p.tags.length ? h("div", { style: { marginTop: "4px" } }, tagChips(p.tags)) : null,
     h("dl", { class: "kv" },
       h("dt", {}, "型"), h("dd", {}, TYPE_LABELS[p.type], p.type === "enum" ? `（${p.enum_options.join(" / ")}）` : ""),
       h("dt", {}, "値の出所"), h("dd", {}, SOURCE_LABELS[p.source]),
@@ -114,6 +116,7 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
       h("div", { class: "grid2" }, h("label", { class: "field" }, "値", valEl), h("label", { class: "field" }, "単位", unitEl)),
       h("label", { class: "field" }, "根拠", rationaleEl),
       h("div", { class: "grid2" }, h("label", { class: "field" }, "出典", refDocEl), h("label", { class: "field" }, "担当", ownerEl)),
+      h("label", { class: "field" }, "タグ", tagsEl),
       h("label", { class: "field" }, "変更理由", commentEl),
       h("div", { class: "row" }, h("button", { class: "primary", onclick: save }, "保存"),
         p.status !== "draft" ? h("span", { class: "hint" }, "値を変えると下書きに戻ります") : null)),

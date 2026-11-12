@@ -13,6 +13,7 @@ import * as baselinesView from "./views/baselines.js";
 import * as historyView from "./views/history.js";
 import * as aiView from "./views/ai.js";
 import * as settingsView from "./views/settings.js";
+import * as searchView from "./views/search.js";
 import * as loginView from "./views/login.js";
 import * as usersView from "./views/users.js";
 
@@ -20,6 +21,7 @@ const SYSTEM_TABS = [
   ["graph", "関連図", graphView],
   ["params", "パラメータ", paramsView],
   ["items", "構成項目", itemsView],
+  ["search", "検索", searchView],
   ["rules", "ルール", rulesView],
   ["layers", "レイヤー", layersView],
   ["approvals", "承認", approvalsView],

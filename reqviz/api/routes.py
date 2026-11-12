@@ -15,7 +15,7 @@ from ..repo import history
 from ..repo import model as repo
 from ..router import Request, Response, Router
 from ..errors import NotFound
-from ..workflow import analysis, baseline, editing, items, param_state, snapshot, templates, versions
+from ..workflow import analysis, baseline, editing, items, param_state, snapshot, tagging, templates, versions
 
 router = Router()
 r = router.route
@@ -387,6 +387,44 @@ def items_transition(req: Request) -> Any:
     if data.get("action") in _APPROVER_ACTIONS:
         _require(req, "approver")
     return items.transition(req.ctx, req.params["id"], data.get("action") or "", data.get("comment") or "", data.get("row_version"))
+
+
+# ---------------------------------------------------------------- タグ・検索
+
+@r("GET", "/api/systems/{sid:int}/tags")
+def tags_list(req: Request) -> Any:
+    """使われているタグと件数"""
+    return tagging.tag_counts(req.ctx, req.params["sid"])
+
+
+@r("POST", "/api/systems/{sid:int}/tags/apply")
+def tags_apply(req: Request) -> Any:
+    """複数のパラメータ・構成項目にタグをまとめて付け外しする（refs, add, remove, comment）"""
+    data = req.json()
+    return tagging.apply_tags(
+        req.ctx, req.params["sid"], _str_list(data.get("refs"), "refs"), data.get("add"), data.get("remove"), data.get("comment") or "",
+    )
+
+
+@r("POST", "/api/systems/{sid:int}/tags/rename")
+def tags_rename(req: Request) -> Any:
+    """タグの名前をシステム全体で変更する（from, to）"""
+    data = req.json()
+    return tagging.rename_tag(req.ctx, req.params["sid"], data.get("from"), data.get("to"), data.get("comment") or "")
+
+
+@r("GET", "/api/systems/{sid:int}/search")
+def search(req: Request) -> Any:
+    """パラメータと構成項目の横断検索（q, tags=カンマ区切り, tag_mode=all|any, kind, status, layer, limit）"""
+    q = req.query
+    try:
+        limit = int(q.get("limit", 200))
+    except ValueError:
+        raise BadRequest("limit は整数で指定してください") from None
+    return tagging.search(
+        req.ctx, req.params["sid"], q.get("q", ""), q.get("tags") or None, q.get("tag_mode") or "all",
+        q.get("kind", ""), q.get("status", ""), q.get("layer", ""), limit,
+    )
 
 
 # ---------------------------------------------------------------- 関連

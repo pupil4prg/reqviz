@@ -2,7 +2,7 @@
 
 import { api } from "../api.js";
 import { refreshNav } from "../main.js";
-import { confirmDialog, fmtAny, fmtTime, h, modal, promptComment, showError, toast, fill } from "../ui.js";
+import { confirmDialog, fmtAny, fmtTime, h, modal, parseTags, promptComment, showError, tagChips, toast, fill } from "../ui.js";
 
 const STATUS = { draft: "下書き", in_review: "レビュー中", approved: "承認済み" };
 const CTYPE = { text: "テキスト", markdown: "Markdown", json: "JSON", yaml: "YAML" };
@@ -40,7 +40,7 @@ export async function render(root, { sid }) {
     return h("div", { class: "row" },
       h("h3", { style: { margin: 0 } }, i.name), h("code", {}, i.ref),
       h("span", { class: `badge ${i.status}` }, STATUS[i.status]),
-      i.tags.map((t) => h("span", { class: "badge" }, t)),
+      tagChips(i.tags),
       h("span", { class: "spacer" }),
       i.status === "draft" ? h("button", { class: "small", onclick: () => act(i, "request_review", "レビュー依頼") }, "レビュー依頼") : null,
       i.status === "in_review" ? [
@@ -167,7 +167,7 @@ export async function render(root, { sid }) {
         onClick: async () => {
           const data = {
             layer_id: Number(layerSel.value), key: key.value.trim(), name: name.value, kind,
-            tags: tags.value.split(",").map((x) => x.trim()).filter(Boolean),
+            tags: parseTags(tags.value),
             rationale: rationale.value, ref_doc: refDoc.value, owner: owner.value, comment: comment.value,
           };
           if (kind === "choice") {

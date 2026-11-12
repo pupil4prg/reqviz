@@ -74,7 +74,7 @@ def build_context(ctx: Ctx, system_id: int) -> dict[str, Any]:
         "layers": [{"key": l["key"], "name": l["name"]} for l in g["layers"]],
         "params": [
             {
-                "ref": n["ref"], "name": n["name"], "aliases": n["aliases"] or None, "layer": layer_names.get(n["layer_key"]),
+                "ref": n["ref"], "name": n["name"], "aliases": n["aliases"] or None, "tags": n["tags"] or None, "layer": layer_names.get(n["layer_key"]),
                 "type": n["type"], "options": n["enum_options"] or None, "value": n["value"],
                 "unit": n["unit"], "rationale": n["rationale"] or None, "formula": n["formula"],
                 "status": n["status"],

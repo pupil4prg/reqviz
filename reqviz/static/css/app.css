@@ -225,3 +225,12 @@ textarea.mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 1
 .alias-label { font-family: inherit; color: var(--muted); margin-right: 4px; }
 .alias-label::after { content: ":"; }
 .alias-row { margin-bottom: 4px; }
+
+/* タグ */
+.tags { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.tag { font-size: 11.5px; padding: 1px 8px; border-radius: 10px; white-space: nowrap;
+  background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); border: 1px solid transparent; }
+.tag.clickable { cursor: pointer; }
+.tag.clickable:hover, .tag.active { border-color: var(--primary); }
+.tag.active { background: var(--primary); color: #fff; }
+.tag .count { opacity: .7; margin-left: 4px; }

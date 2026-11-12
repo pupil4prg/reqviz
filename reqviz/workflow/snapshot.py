@@ -16,7 +16,7 @@ FORMAT = "reqviz/system"
 RULES_FORMAT = "reqviz/rules"
 FORMAT_VERSION = 1
 
-PARAM_FIELDS = ("layer", "key", "name", "aliases", "type", "enum_options", "value", "unit", "source", "rationale", "ref_doc", "owner")
+PARAM_FIELDS = ("layer", "key", "name", "aliases", "tags", "type", "enum_options", "value", "unit", "source", "rationale", "ref_doc", "owner")
 RULE_FIELDS = ("key", "kind", "target", "expression", "nl_text", "severity", "description", "enabled")
 ITEM_FIELDS = (
     "layer", "key", "name", "kind", "options", "selected", "content_type", "content",

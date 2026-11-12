@@ -60,6 +60,7 @@ def param_dict(r: Any) -> dict[str, Any]:
     d["ref"] = f"{d['layer_key']}.{d['key']}"
     d["enum_options"] = loads(d["enum_options"], [])
     d["aliases"] = loads(d.get("aliases"), [])
+    d["tags"] = loads(d.get("tags"), [])
     d["value"] = loads(d["value"])
     d["has_proposal"] = d["proposed_value"] is not None
     d["proposed_value"] = loads(d["proposed_value"])

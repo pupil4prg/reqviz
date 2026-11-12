@@ -3,7 +3,7 @@
 import { api } from "../api.js";
 import { refreshNav } from "../main.js";
 import {
-  aliasList, flagBadges, fmtValue, h, modal, paramMatches, readValue, showError, SOURCE_LABELS, statusBadge, toast, TYPE_LABELS, valueInput,
+  aliasList, flagBadges, fmtValue, h, modal, paramMatches, parseTags, tagChips, readValue, showError, SOURCE_LABELS, statusBadge, toast, TYPE_LABELS, valueInput,
   fill,
 } from "../ui.js";
 
@@ -14,11 +14,12 @@ const BULK_ACTIONS = [
   ["withdraw", "下書きに戻す"],
 ];
 
-export async function render(root, { sid }) {
+export async function render(root, { sid, query }) {
   const page = h("div", { class: "page" });
   root.append(page);
-  let filterText = "";
+  let filterText = query.q || "";
   let filterStatus = "";
+  let filterTag = query.tag || "";
 
   async function load() {
     const graph = await api.get(`/api/systems/${sid}/graph`);
@@ -30,11 +31,17 @@ export async function render(root, { sid }) {
     const statusSel = h("select", {}, h("option", { value: "" }, "すべての状態"),
       [["draft", "下書き"], ["ai_evaluated", "AI評価済み"], ["in_review", "レビュー中"], ["approved", "承認済み"], ["stale", "要再計算"]]
         .map(([v, l]) => h("option", { value: v, selected: filterStatus === v }, l)));
+    const allTags = [...new Set(nodes.flatMap((n) => n.tags))].sort((a, b) => a.localeCompare(b, "ja"));
+    if (filterTag && !allTags.includes(filterTag)) filterTag = "";
+    const tagSel = h("select", { title: "タグで絞り込む" }, h("option", { value: "" }, "すべてのタグ"),
+      allTags.map((t) => h("option", { value: t, selected: filterTag === t }, `${t}（${nodes.filter((n) => n.tags.includes(t)).length}）`)));
     const tbody = h("tbody");
-    const bulkSel = h("select", {}, h("option", { value: "" }, "選択したものを…"), BULK_ACTIONS.map(([v, l]) => h("option", { value: v }, l)));
+    const bulkSel = h("select", {}, h("option", { value: "" }, "選択したものを…"), BULK_ACTIONS.map(([v, l]) => h("option", { value: v }, l)),
+      h("option", { value: "tags" }, "タグを付け外し…"));
     const saveBtn = h("button", { class: "primary", disabled: true, onclick: saveAll }, "変更を保存");
 
     function visible(n) {
+      if (filterTag && !n.tags.includes(filterTag)) return false;
       if (filterStatus === "stale" ? !n.flag_stale : filterStatus && n.status !== filterStatus) return false;
       return paramMatches(n, filterText.trim().toLowerCase());
     }
@@ -44,7 +51,7 @@ export async function render(root, { sid }) {
       for (const layer of graph.layers) {
         const rows = nodes.filter((n) => n.layer_key === layer.key && visible(n));
         if (!rows.length) continue;
-        tbody.append(h("tr", { class: "group" }, h("td", { colspan: 9 }, layer.name)));
+        tbody.append(h("tr", { class: "group" }, h("td", { colspan: 10 }, layer.name)));
         for (const n of rows) tbody.append(row(n));
       }
     }
@@ -75,6 +82,7 @@ export async function render(root, { sid }) {
           n.has_proposal ? h("div", { class: "small", style: { color: "var(--stale)" } }, `案: ${fmtValue(n.proposed_value)}`) : null) : val),
         h("td", {}, unit),
         h("td", { style: { minWidth: "200px" } }, rat),
+        h("td", {}, tagChips(n.tags, (t) => { filterTag = t; tagSel.value = t; renderRows(); })),
         h("td", { class: "small" }, SOURCE_LABELS[n.source]),
         h("td", {}, statusBadge(n.status)),
         h("td", {}, h("div", { class: "row" }, flagBadges(n))));
@@ -93,10 +101,37 @@ export async function render(root, { sid }) {
       refreshNav(sid, "params");
     }
 
+    function bulkTags() {
+      const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+      const refs = [...selected].map((id) => byId[id].ref);
+      const add = h("input", { placeholder: "例: 確定", list: "known-tags" });
+      const remove = h("input", { placeholder: "例: 開発中", list: "known-tags" });
+      const comment = h("input", { placeholder: "変更理由（履歴に残ります・任意）" });
+      modal({
+        title: `タグを付け外し（${refs.length} 件）`,
+        body: [
+          h("datalist", { id: "known-tags" }, allTags.map((t) => h("option", { value: t }))),
+          h("label", { class: "field" }, "付けるタグ（カンマ区切り）", add),
+          h("label", { class: "field" }, "外すタグ（カンマ区切り）", remove),
+          h("label", { class: "field" }, "変更理由", comment),
+          h("p", { class: "hint" }, "タグを変えても、承認の状態は変わりません。"),
+        ],
+        buttons: [{ label: "キャンセル" }, {
+          label: "適用", primary: true,
+          onClick: async () => {
+            const res = await api.post(`/api/systems/${sid}/tags/apply`, { refs, add: parseTags(add.value), remove: parseTags(remove.value), comment: comment.value });
+            toast(`${res.updated.length} 件のタグを変更しました`);
+            await load();
+          },
+        }],
+      });
+    }
+
     async function bulk() {
       const action = bulkSel.value;
       bulkSel.value = "";
       if (!action || !selected.size) return;
+      if (action === "tags") return bulkTags();
       try {
         const res = await api.post(`/api/systems/${sid}/transition`, { param_ids: [...selected], action });
         toast(`${res.ok.length} 件を処理しました${res.failed.length ? `（${res.failed.length} 件は対象外）` : ""}`, res.failed.length ? "error" : "info");
@@ -116,6 +151,7 @@ export async function render(root, { sid }) {
 
     search.addEventListener("input", () => { filterText = search.value; renderRows(); });
     statusSel.addEventListener("change", () => { filterStatus = statusSel.value; renderRows(); });
+    tagSel.addEventListener("change", () => { filterTag = tagSel.value; renderRows(); });
     const allCb = h("input", {
       type: "checkbox", title: "表示中をすべて選択",
       onchange: (e) => { nodes.filter(visible).forEach((n) => (e.target.checked ? selected.add(n.id) : selected.delete(n.id))); renderRows(); },
@@ -125,9 +161,9 @@ export async function render(root, { sid }) {
     fill(page, 
       h("div", { class: "row" }, h("h1", {}, "パラメータ"), h("span", { class: "spacer" }),
         h("button", { onclick: () => paramDialog(sid, graph.layers, null, load) }, "＋ パラメータ")),
-      h("div", { class: "row", style: { marginBottom: "10px" } }, search, statusSel, h("span", { class: "spacer" }), bulkSel, saveBtn),
+      h("div", { class: "row", style: { marginBottom: "10px" } }, search, statusSel, tagSel, h("span", { class: "spacer" }), bulkSel, saveBtn),
       h("div", { class: "table-wrap" }, h("table", { class: "tbl" },
-        h("thead", {}, h("tr", {}, h("th", {}, allCb), ["名前", "型", "値", "単位", "根拠", "出所", "状態", "フラグ"].map((x) => h("th", {}, x)))),
+        h("thead", {}, h("tr", {}, h("th", {}, allCb), ["名前", "型", "値", "単位", "根拠", "タグ", "出所", "状態", "フラグ"].map((x) => h("th", {}, x)))),
         tbody)),
       h("p", { class: "hint" }, "算出式で決まる値（ƒ）は、関連図の「再計算」から更新してください。値を変更すると、承認済みなどの状態は下書きに戻ります。"),
     );
@@ -160,6 +196,7 @@ export function paramDialog(sid, layers, p, onDone) {
     aliasBox,
     h("div", { class: "row" }, h("button", { class: "small", type: "button", onclick: () => aliasBox.append(aliasRow({ label: "", value: "" })) }, "＋ 別名を追加"),
       h("span", { class: "hint" }, "設定ファイル上のパラメータ名や、日本語の論理名などを登録できます。検索の対象になります。")));
+  const tags = h("input", { value: p ? p.tags.join(", ") : "", placeholder: "カンマ区切り（例: 開発中, DB）" });
   const syncType = () => { optsField.style.display = type.value === "enum" ? "" : "none"; };
   type.addEventListener("change", syncType);
   syncType();
@@ -174,6 +211,7 @@ export function paramDialog(sid, layers, p, onDone) {
       optsField,
       h("label", { class: "field" }, "値", value),
       h("label", { class: "field" }, "根拠", rationale),
+      h("label", { class: "field" }, "タグ", tags),
       h("p", { class: "hint" }, "式からは「レイヤーキー.キー」で参照します。キーを変更すると、ルールの式も自動で書き換わります。"),
     ],
     buttons: [{ label: "キャンセル" }, {
@@ -187,7 +225,7 @@ export function paramDialog(sid, layers, p, onDone) {
         const body = {
           layer_id: Number(layer.value), key: key.value.trim(), name: name.value, type: t,
           enum_options: t === "enum" ? opts.value.split(",").map((x) => x.trim()).filter(Boolean) : [],
-          value: v, unit: unit.value, rationale: rationale.value,
+          value: v, unit: unit.value, rationale: rationale.value, tags: parseTags(tags.value),
           aliases: [...aliasBox.children].map((row) => ({
             label: row.querySelector('[data-f="label"]').value.trim(), value: row.querySelector('[data-f="value"]').value.trim(),
           })).filter((a) => a.value),
