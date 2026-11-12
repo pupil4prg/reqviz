@@ -99,7 +99,7 @@ export class GraphCanvas {
     const t = this.filter.text.trim().toLowerCase();
     if (this.filter.layer && n.layer_key !== this.filter.layer) return false;
     if (!t) return true;
-    return [n.ref, n.name, n.key, n.description, n.expression].some((v) => v && String(v).toLowerCase().includes(t));
+    return [n.ref, n.name, n.key, n.description, n.expression, ...(n.aliases || []).map((x) => x.value)].some((v) => v && String(v).toLowerCase().includes(t));
   }
 
   draw() {

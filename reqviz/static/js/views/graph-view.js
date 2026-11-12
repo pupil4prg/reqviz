@@ -127,7 +127,7 @@ export async function render(root, { sid, query }) {
   function renderToolbar() {
     const stale = graph.nodes.filter((n) => n.flag_stale).length;
     const proposals = graph.nodes.filter((n) => n.has_proposal).length;
-    const search = h("input", { type: "search", placeholder: "検索（名前・参照名）", value: canvas.filter.text, style: { width: "180px" } });
+    const search = h("input", { type: "search", placeholder: "検索（名前・参照名・別名）", value: canvas.filter.text, style: { width: "180px" } });
     search.addEventListener("input", () => { canvas.filter.text = search.value; canvas.draw(); });
     search.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;

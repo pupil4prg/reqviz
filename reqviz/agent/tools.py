@@ -142,8 +142,14 @@ COMMENT = {"comment": _s("変更理由。履歴・監査ログに残る")}
 ROWV = {"row_version": _i("楽観ロック用。取得時の row_version を渡すと、他者の更新と衝突したときに 409 になる")}
 REF_HELP = "参照名は「レイヤーキー.キー」（例: app.server_count）"
 
+_ALIAS = {
+    "type": "object",
+    "properties": {"label": _s("別名の種類（例: 実装名、論理名、英語名）"), "value": _s("別名（例: max_connections）")},
+    "required": ["value"],
+}
 _PARAM_BODY = {
     "name": _s("表示名"),
+    "aliases": _arr("別名の一覧。実装上のパラメータ名や論理名など（指定すると全体を置き換える）", _ALIAS),
     "type": _s("型", enum=["number", "string", "enum", "bool"]),
     "enum_options": _arr("type=enum のときの選択肢"),
     "value": {"description": "値（型に合わせる。未設定は null）"},
@@ -194,6 +200,8 @@ TOOLS: list[Tool] = [
     Tool("list_params", "パラメータ一覧（値・単位・状態・フラグ・再計算案）", "GET", "/api/systems/{system_id}/params", {**SID}),
     Tool("get_param", "パラメータ 1 件の詳細（変更履歴・監査ログ・レビュー可否つき）", "GET", "/api/params/{param_id}", {"param_id": _i("パラメータ ID")}),
     Tool("get_param_by_ref", "参照名でパラメータを取得する。" + REF_HELP, "GET", "/api/systems/{system_id}/params/by-ref/{ref}", {**SID, "ref": _s("参照名")}),
+    Tool("lookup_params", "名前からパラメータを引く。参照名・キー・表示名・別名（実装上のパラメータ名など）のいずれかに完全一致するものをすべて返す",
+         "GET", "/api/systems/{system_id}/params/lookup", {**SID, "name": _s("探す名前（例: max_connections）")}, required=("name",), query=("name",)),
     Tool("list_items", "構成項目の一覧。choice = 実装方式などの選択肢（列挙データ）、document = 不定形データ", "GET",
          "/api/systems/{system_id}/items", {**SID, "kind": _s("種別で絞り込む", enum=["choice", "document"])}, query=("kind",)),
     Tool("get_item", "構成項目 1 件の詳細（版の系列つき）", "GET", "/api/items/{item_id}", {"item_id": _i("構成項目 ID")}),

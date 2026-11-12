@@ -3,7 +3,7 @@
 import { api } from "../api.js";
 import { refreshNav } from "../main.js";
 import {
-  flagBadges, fmtValue, h, modal, readValue, showError, SOURCE_LABELS, statusBadge, toast, TYPE_LABELS, valueInput,
+  aliasList, flagBadges, fmtValue, h, modal, paramMatches, readValue, showError, SOURCE_LABELS, statusBadge, toast, TYPE_LABELS, valueInput,
   fill,
 } from "../ui.js";
 
@@ -26,7 +26,7 @@ export async function render(root, { sid }) {
     const selected = new Set();
     const dirty = new Map(); // id -> {el, node}
 
-    const search = h("input", { type: "search", placeholder: "絞り込み", value: filterText });
+    const search = h("input", { type: "search", placeholder: "絞り込み（名前・参照名・別名）", value: filterText, style: { width: "240px" } });
     const statusSel = h("select", {}, h("option", { value: "" }, "すべての状態"),
       [["draft", "下書き"], ["ai_evaluated", "AI評価済み"], ["in_review", "レビュー中"], ["approved", "承認済み"], ["stale", "要再計算"]]
         .map(([v, l]) => h("option", { value: v, selected: filterStatus === v }, l)));
@@ -36,8 +36,7 @@ export async function render(root, { sid }) {
 
     function visible(n) {
       if (filterStatus === "stale" ? !n.flag_stale : filterStatus && n.status !== filterStatus) return false;
-      const t = filterText.toLowerCase();
-      return !t || [n.ref, n.name, n.rationale].some((v) => v && v.toLowerCase().includes(t));
+      return paramMatches(n, filterText.trim().toLowerCase());
     }
 
     function renderRows() {
@@ -70,7 +69,7 @@ export async function render(root, { sid }) {
       rat.addEventListener("input", () => markDirty(n, "rationale", rat));
       return h("tr", {},
         h("td", {}, cb),
-        h("td", {}, h("a", { href: `#/s/${sid}/graph?ref=${encodeURIComponent(n.ref)}` }, n.name), h("div", { class: "mono small muted" }, n.ref)),
+        h("td", {}, h("a", { href: `#/s/${sid}/graph?ref=${encodeURIComponent(n.ref)}` }, n.name), h("div", { class: "mono small muted" }, n.ref), aliasList(n.aliases)),
         h("td", { class: "small" }, TYPE_LABELS[n.type]),
         h("td", { style: { minWidth: "130px" } }, n.formula ? h("div", { title: n.formula }, h("span", { class: "muted small" }, "ƒ "), fmtValue(n.value) || "∅",
           n.has_proposal ? h("div", { class: "small", style: { color: "var(--stale)" } }, `案: ${fmtValue(n.proposed_value)}`) : null) : val),
@@ -148,6 +147,19 @@ export function paramDialog(sid, layers, p, onDone) {
   const value = h("input", { value: p ? fmtValue(p.value) : "" });
   const unit = h("input", { value: p ? p.unit : "" });
   const rationale = h("textarea", {}, p ? p.rationale : "");
+  const aliasRow = (a) => {
+    const row = h("div", { class: "row alias-row" },
+      h("input", { value: a.label, placeholder: "種類（例: 実装名）", list: "alias-labels", style: { width: "150px" }, dataset: { f: "label" } }),
+      h("input", { value: a.value, placeholder: "別名（例: max_connections）", style: { flex: "1" }, dataset: { f: "value" } }),
+      h("button", { class: "small danger", type: "button", title: "この別名を削除", onclick: () => row.remove() }, "×"));
+    return row;
+  };
+  const aliasBox = h("div", {}, (p ? p.aliases : []).map(aliasRow));
+  const aliasField = h("div", { class: "field" }, "別名",
+    h("datalist", { id: "alias-labels" }, ["実装名", "論理名", "英語名", "旧名", "略称"].map((x) => h("option", { value: x }))),
+    aliasBox,
+    h("div", { class: "row" }, h("button", { class: "small", type: "button", onclick: () => aliasBox.append(aliasRow({ label: "", value: "" })) }, "＋ 別名を追加"),
+      h("span", { class: "hint" }, "設定ファイル上のパラメータ名や、日本語の論理名などを登録できます。検索の対象になります。")));
   const syncType = () => { optsField.style.display = type.value === "enum" ? "" : "none"; };
   type.addEventListener("change", syncType);
   syncType();
@@ -157,6 +169,7 @@ export function paramDialog(sid, layers, p, onDone) {
     body: [
       h("div", { class: "grid2" }, h("label", { class: "field" }, "レイヤー", layer), h("label", { class: "field" }, "キー", key)),
       h("label", { class: "field" }, "名前", name),
+      aliasField,
       h("div", { class: "grid2" }, h("label", { class: "field" }, "型", type), h("label", { class: "field" }, "単位", unit)),
       optsField,
       h("label", { class: "field" }, "値", value),
@@ -175,6 +188,9 @@ export function paramDialog(sid, layers, p, onDone) {
           layer_id: Number(layer.value), key: key.value.trim(), name: name.value, type: t,
           enum_options: t === "enum" ? opts.value.split(",").map((x) => x.trim()).filter(Boolean) : [],
           value: v, unit: unit.value, rationale: rationale.value,
+          aliases: [...aliasBox.children].map((row) => ({
+            label: row.querySelector('[data-f="label"]').value.trim(), value: row.querySelector('[data-f="value"]').value.trim(),
+          })).filter((a) => a.value),
         };
         if (p) await api.put(`/api/params/${p.id}`, { ...body, row_version: p.row_version });
         else await api.post(`/api/systems/${sid}/params`, body);

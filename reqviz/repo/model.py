@@ -59,6 +59,7 @@ def param_dict(r: Any) -> dict[str, Any]:
     d = dict(r)
     d["ref"] = f"{d['layer_key']}.{d['key']}"
     d["enum_options"] = loads(d["enum_options"], [])
+    d["aliases"] = loads(d.get("aliases"), [])
     d["value"] = loads(d["value"])
     d["has_proposal"] = d["proposed_value"] is not None
     d["proposed_value"] = loads(d["proposed_value"])
@@ -83,6 +84,21 @@ def get_param(ctx: Ctx, param_id: int) -> dict[str, Any]:
 
 def params_by_ref(ctx: Ctx, system_id: int) -> dict[str, dict[str, Any]]:
     return {p["ref"]: p for p in list_params(ctx, system_id)}
+
+
+def lookup_params(ctx: Ctx, system_id: int, name: str) -> list[dict[str, Any]]:
+    """参照名・キー・名前・別名のいずれかが name と一致するパラメータ（大文字小文字は区別しない）。
+
+    別名は一意とは限らない（同じ実装名を複数のサーバーが持つ、など）ので、一致したものをすべて返す。
+    """
+    want = name.strip().casefold()
+    out = []
+    for p in list_params(ctx, system_id):
+        matched = [m for m, v in (("ref", p["ref"]), ("key", p["key"]), ("name", p["name"])) if v.casefold() == want]
+        matched += [f"alias:{a['label']}" if a["label"] else "alias" for a in p["aliases"] if a["value"].casefold() == want]
+        if matched:
+            out.append({**p, "matched": matched})
+    return out
 
 
 def rule_dict(r: Any) -> dict[str, Any]:

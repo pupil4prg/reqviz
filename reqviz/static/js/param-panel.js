@@ -2,8 +2,9 @@
 
 import { api } from "./api.js";
 import { startAi } from "./ai-run.js";
+import { paramDialog } from "./views/params.js";
 import {
-  confirmDialog, flagBadges, fmtTime, fmtValue, h, KIND_LABELS, promptComment, readValue, showError,
+  aliasList, confirmDialog, flagBadges, fmtTime, fmtValue, h, KIND_LABELS, promptComment, readValue, showError,
   SOURCE_LABELS, statusBadge, STATUS_LABELS, toast, TYPE_LABELS, valueInput,
   fill,
 } from "./ui.js";
@@ -83,6 +84,7 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
   fill(container, 
     h("h2", {}, p.name),
     h("div", { class: "row" }, h("code", {}, p.ref), statusBadge(p.status), flagBadges({ ...p, violation: node.violation })),
+    aliasList(p.aliases),
     h("dl", { class: "kv" },
       h("dt", {}, "型"), h("dd", {}, TYPE_LABELS[p.type], p.type === "enum" ? `（${p.enum_options.join(" / ")}）` : ""),
       h("dt", {}, "値の出所"), h("dd", {}, SOURCE_LABELS[p.source]),
@@ -147,7 +149,9 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
       : null,
 
     h("section", {}, h("h3", {}, "履歴"), historyList(p)),
-    h("section", {}, h("button", { class: "small danger", onclick: remove }, "このパラメータを削除")),
+    h("section", {}, h("div", { class: "row" },
+      graph ? h("button", { class: "small", onclick: () => paramDialog(sid, graph.layers, p, onChange) }, "定義を編集（名前・別名・型・キー）") : null,
+      h("button", { class: "small danger", onclick: remove }, "このパラメータを削除"))),
   );
 }
 

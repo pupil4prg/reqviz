@@ -32,7 +32,7 @@ MCP と A2A は独自の業務ロジックを持たず、ツール定義表（`r
 |---|---|
 | システム | `GET/POST /api/systems`、`GET/PUT/DELETE /api/systems/{sid}`、`POST .../clone` |
 | レイヤー | `GET/POST /api/systems/{sid}/layers`、`POST .../layers/reorder`、`GET/PUT/DELETE /api/layers/{id}` |
-| パラメータ | `GET/POST /api/systems/{sid}/params`、`GET .../params/by-ref/{ref}`、`GET/PUT/DELETE /api/params/{id}`、`POST /api/params/{id}/transition` |
+| パラメータ | `GET/POST /api/systems/{sid}/params`、`GET .../params/lookup?name=`、`GET .../params/by-ref/{ref}`、`GET/PUT/DELETE /api/params/{id}`、`POST /api/params/{id}/transition` |
 | 構成項目 | `GET/POST /api/systems/{sid}/items`（`?kind=choice\|document`）、`GET .../items/by-ref/{ref}`、`GET/PUT/DELETE /api/items/{id}`、`POST /api/items/{id}/transition` |
 | ルール・関連 | `GET/POST /api/systems/{sid}/rules`、`POST .../rules/validate`、`GET/PUT/DELETE /api/rules/{id}`、`GET/POST /api/systems/{sid}/relations`、`GET/PUT/DELETE /api/relations/{id}` |
 | 計算 | `GET .../graph`、`GET .../violations`、`POST .../recalc`、`POST .../apply-proposals` |
@@ -98,11 +98,11 @@ curl -X POST http://127.0.0.1:8765/api/systems/1/items -H 'Content-Type: applica
 
 ### ツール
 
-56 個。読み取り専用のものには `annotations.readOnlyHint = true`、取り消せない操作には `destructiveHint = true` を付けている。
+57 個。読み取り専用のものには `annotations.readOnlyHint = true`、取り消せない操作には `destructiveHint = true` を付けている。
 
 | 分類 | ツール |
 |---|---|
-| 参照 | `list_systems` `get_system` `list_layers` `list_params` `get_param` `get_param_by_ref` `list_items` `get_item` `get_item_by_ref` `list_rules` `list_relations` `get_graph` `get_violations` `get_approvals` `list_templates` `export_system` `validate_rule` `api_catalog` |
+| 参照 | `list_systems` `get_system` `list_layers` `list_params` `get_param` `get_param_by_ref` `lookup_params` `list_items` `get_item` `get_item_by_ref` `list_rules` `list_relations` `get_graph` `get_violations` `get_approvals` `list_templates` `export_system` `validate_rule` `api_catalog` |
 | 版・履歴の参照 | `list_baselines` `get_baseline` `diff_baselines` `list_revisions` `get_revision` `get_timeline` `get_state_at` `diff_history` `list_audit` |
 | システム・レイヤー | `create_system` `update_system` `clone_system` `delete_system` `create_layer` `update_layer` `delete_layer` |
 | パラメータ | `create_param` `update_param` `delete_param` `transition_param` |

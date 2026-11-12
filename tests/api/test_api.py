@@ -214,3 +214,19 @@ def test_items_and_history_api(server):
     assert call(server, "GET", f"/api/rules/{rule['id']}")[1]["revisions"][0]["version"] == 1
     layer = call(server, "GET", f"/api/systems/{sid}/layers")[1][0]
     assert call(server, "GET", f"/api/layers/{layer['id']}")[1]["key"] == layer["key"]
+
+
+def test_aliases_api(server):
+    tpl = call(server, "GET", "/api/templates")[1][0]
+    sid = call(server, "POST", "/api/systems", {"name": "A", "template_id": tpl["id"]})[1]["id"]
+    p = call(server, "GET", f"/api/systems/{sid}/params/by-ref/db.max_connections")[1]
+    st, upd, _ = call(server, "PUT", f"/api/params/{p['id']}", {"aliases": [{"label": "実装名", "value": "max_connections"}, "最大接続数"]})
+    assert st == 200 and upd["aliases"] == [{"label": "実装名", "value": "max_connections"}, {"label": "", "value": "最大接続数"}]
+    assert call(server, "PUT", f"/api/params/{p['id']}", {"aliases": [{"label": "x"}]})[0] == 422
+
+    from urllib.parse import quote
+    st, hits, _ = call(server, "GET", f"/api/systems/{sid}/params/lookup?name={quote('最大接続数')}")
+    assert st == 200 and [(h["ref"], h["matched"]) for h in hits] == [("db.max_connections", ["alias"])]
+    assert call(server, "GET", f"/api/systems/{sid}/params/lookup?name=zzz")[1] == []
+    assert call(server, "GET", f"/api/systems/{sid}/params/lookup")[0] == 400
+    assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][0]["aliases"] == []
