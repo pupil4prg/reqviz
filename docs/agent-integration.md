@@ -31,6 +31,7 @@ MCP と A2A は独自の業務ロジックを持たず、ツール定義表（`r
 | 分類 | ルート |
 |---|---|
 | システム | `GET/POST /api/systems`、`GET/PUT/DELETE /api/systems/{sid}`、`POST .../clone` |
+| 環境 | `GET/POST /api/systems/{sid}/environments`、`GET .../environments/compare`、`POST .../environments/sync`、`POST .../environments/copy-values`、`PUT/DELETE /api/systems/{sid}/environment` |
 | レイヤー | `GET/POST /api/systems/{sid}/layers`、`POST .../layers/reorder`、`GET/PUT/DELETE /api/layers/{id}` |
 | パラメータ | `GET/POST /api/systems/{sid}/params`、`GET .../params/lookup?name=`、`GET .../params/by-ref/{ref}`、`GET/PUT/DELETE /api/params/{id}`、`POST /api/params/{id}/transition` |
 | コンポーネント | `GET/POST /api/systems/{sid}/components`、`GET .../components/analysis`、`POST .../components/assign`、`GET/PUT/DELETE /api/components/{id}`、`GET/POST /api/systems/{sid}/component-deps`、`PUT/DELETE /api/component-deps/{id}` |
@@ -100,15 +101,16 @@ curl -X POST http://127.0.0.1:8765/api/systems/1/items -H 'Content-Type: applica
 
 ### ツール
 
-71 個。読み取り専用のものには `annotations.readOnlyHint = true`、取り消せない操作には `destructiveHint = true` を付けている。
+76 個。読み取り専用のものには `annotations.readOnlyHint = true`、取り消せない操作には `destructiveHint = true` を付けている。
 
 | 分類 | ツール |
 |---|---|
-| 参照 | `list_systems` `get_system` `list_layers` `list_params` `get_param` `get_param_by_ref` `lookup_params` `search` `list_tags` `list_items` `get_item` `get_item_by_ref` `list_components` `list_component_deps` `analyze_components` `list_rules` `list_relations` `get_graph` `get_violations` `get_approvals` `list_templates` `export_system` `validate_rule` `api_catalog` |
+| 参照 | `list_systems` `get_system` `list_environments` `compare_environments` `list_layers` `list_params` `get_param` `get_param_by_ref` `lookup_params` `search` `list_tags` `list_items` `get_item` `get_item_by_ref` `list_components` `list_component_deps` `analyze_components` `list_rules` `list_relations` `get_graph` `get_violations` `get_approvals` `list_templates` `export_system` `validate_rule` `api_catalog` |
 | 版・履歴の参照 | `list_baselines` `get_baseline` `diff_baselines` `list_revisions` `get_revision` `get_timeline` `get_state_at` `diff_history` `list_audit` |
 | システム・レイヤー | `create_system` `update_system` `clone_system` `delete_system` `create_layer` `update_layer` `delete_layer` |
 | パラメータ | `create_param` `update_param` `delete_param` `transition_param` |
 | 構成項目 | `create_item` `update_item` `delete_item` `transition_item` |
+| 環境 | `create_environment` `sync_environment_structure` `copy_environment_values` |
 | コンポーネント | `create_component` `update_component` `delete_component` `assign_component` `create_component_dep` `update_component_dep` `delete_component_dep` |
 | タグ | `apply_tags` `rename_tag` |
 | ルール・関連 | `create_rule` `update_rule` `delete_rule` `create_relation` `delete_relation` |

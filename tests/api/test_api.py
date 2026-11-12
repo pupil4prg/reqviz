@@ -284,3 +284,33 @@ def test_components_api(server):
     assert call(server, "DELETE", f"/api/component-deps/{dep['id']}")[1] == {"ok": True}
     assert call(server, "DELETE", f"/api/components/{os_['id']}")[1] == {"ok": True}
     assert call(server, "GET", f"/api/params/{p['id']}")[1]["component"] is None
+
+
+def test_environments_api(server):
+    tpl = call(server, "GET", "/api/templates")[1][0]
+    prod = call(server, "POST", "/api/systems", {"name": "E", "template_id": tpl["id"]})[1]["id"]
+    assert [e["env_key"] for e in call(server, "GET", f"/api/systems/{prod}/environments")[1]] == [""]
+    assert call(server, "POST", f"/api/systems/{prod}/environments", {"key": "dev", "name": "開発"})[0] == 422
+    st, dev, _ = call(server, "POST", f"/api/systems/{prod}/environments", {"key": "dev", "name": "開発", "current_key": "prod", "current_name": "本番"})
+    assert st == 200 and dev["env_key"] == "dev" and dev["env_group_id"] == prod
+    systems = {s["id"]: s for s in call(server, "GET", "/api/systems")[1]}
+    assert systems[prod]["env_name"] == "本番" and systems[dev["id"]]["env_group_id"] == prod
+    assert call(server, "PUT", f"/api/systems/{dev['id']}/environment", {"name": "開発1"})[1]["env_name"] == "開発1"
+
+    p = call(server, "GET", f"/api/systems/{dev['id']}/params/by-ref/biz.peak_tps")[1]
+    call(server, "PUT", f"/api/params/{p['id']}", {"value": 20, "name": "ピーク TPS"})
+    st, c, _ = call(server, "GET", f"/api/systems/{prod}/environments/compare")
+    row = next(r for r in c["params"] if r["ref"] == "biz.peak_tps")
+    assert row["differs"] and row["definition_differs"] == ["name"] and c["summary"]["value_differences"] == 1
+
+    st, pre, _ = call(server, "POST", f"/api/systems/{dev['id']}/environments/sync", {"targets": [prod], "preview": True})
+    assert st == 200 and pre["targets"][0]["changes"] == 1
+    assert call(server, "POST", f"/api/systems/{dev['id']}/environments/sync", {"targets": [prod]})[1]["preview"] is False
+    assert call(server, "GET", f"/api/systems/{prod}/params/by-ref/biz.peak_tps")[1]["name"] == "ピーク TPS"
+    assert call(server, "POST", f"/api/systems/{dev['id']}/environments/sync", {"targets": "x"})[0] == 400
+    st, res, _ = call(server, "POST", f"/api/systems/{dev['id']}/environments/copy-values", {"target": prod, "refs": ["biz.peak_tps"]})
+    assert res["copied"] == ["biz.peak_tps"]
+    assert call(server, "POST", f"/api/systems/{dev['id']}/environments/copy-values", {"target": 999, "refs": ["biz.peak_tps"]})[0] == 422
+
+    assert call(server, "DELETE", f"/api/systems/{dev['id']}/environment")[1]["env_group_id"] is None
+    assert call(server, "GET", f"/api/systems/{prod}")[1]["env_group_id"] is None

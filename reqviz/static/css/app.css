@@ -251,3 +251,8 @@ textarea.mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 1
 .legend-inline .ln { display: inline-block; width: 26px; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
 .ln.solid { border-color: var(--primary); } .ln.notify { border-color: var(--stale); border-top-width: 3px; }
 .ln.weak { border-color: var(--muted); border-top-style: dotted; } .ln.undeclared { border-color: var(--danger); border-top-style: dashed; }
+
+/* 環境 */
+.env-switch { padding: 3px 6px; font-weight: 600; margin-right: 8px; }
+.env-table td.env-diff { background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.env-table td.env-missing, td.env-missing { color: var(--muted); background: var(--surface-2); font-size: 12.5px; }
