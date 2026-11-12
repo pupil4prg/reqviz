@@ -265,6 +265,15 @@ def params_create(req: Request) -> Any:
     return editing.create_param(req.ctx, req.params["sid"], req.json())
 
 
+@r("GET", "/api/systems/{sid:int}/params/lookup")
+def params_lookup(req: Request) -> Any:
+    """名前からパラメータを引く（name = 参照名・キー・名前・別名のいずれか。完全一致、複数件ありうる）"""
+    name = req.query.get("name") or ""
+    if not name.strip():
+        raise BadRequest("name を指定してください")
+    return repo.lookup_params(req.ctx, req.params["sid"], name)
+
+
 @r("GET", "/api/systems/{sid:int}/params/by-ref/{ref}")
 def params_get_by_ref(req: Request) -> Any:
     """参照名（layer.key）でパラメータを取得する"""

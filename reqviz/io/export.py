@@ -16,7 +16,7 @@ from ..workflow import analysis, baseline
 from ..workflow.param_state import STATUS_LABELS
 
 CSV_COLUMNS = [
-    ("layer_name", "レイヤー"), ("ref", "参照名"), ("name", "名前"), ("type", "型"),
+    ("layer_name", "レイヤー"), ("ref", "参照名"), ("name", "名前"), ("aliases", "別名"), ("type", "型"),
     ("value", "値"), ("unit", "単位"), ("status", "状態"), ("source", "値の出所"),
     ("formula", "算出式"), ("rationale", "根拠"), ("ref_doc", "出典"), ("owner", "担当"),
     ("flag_stale", "要再計算"), ("flag_upstream_changed", "承認後に上流変更あり"), ("violation", "制約違反"),
@@ -33,6 +33,10 @@ def fmt_value(v: Any) -> str:
     return str(v)
 
 
+def fmt_aliases(aliases: list[dict[str, str]]) -> str:
+    return "; ".join(f"{a['label']}={a['value']}" if a["label"] else a["value"] for a in aliases)
+
+
 def to_csv(ctx: Ctx, system_id: int) -> bytes:
     g = analysis.graph(ctx, system_id)
     layer_names = {l["key"]: l["name"] for l in g["layers"]}
@@ -43,6 +47,7 @@ def to_csv(ctx: Ctx, system_id: int) -> bytes:
         row = {
             **n,
             "layer_name": layer_names.get(n["layer_key"], n["layer_key"]),
+            "aliases": fmt_aliases(n["aliases"]),
             "value": fmt_value(n["value"]),
             "status": STATUS_LABELS.get(n["status"], n["status"]),
             "source": SOURCE_LABELS.get(n["source"], n["source"]),
@@ -182,7 +187,8 @@ def to_html(ctx: Ctx, system_id: int) -> bytes:
                  "<th>状態</th><th>算出式</th><th>根拠</th><th>出典</th></tr>")
         for n in ns:
             h.append(
-                f"<tr><td><code>{escape(n['ref'])}</code></td><td>{escape(n['name'])}</td>"
+                f"<tr><td><code>{escape(n['ref'])}</code></td><td>{escape(n['name'])}"
+                + (f"<div class='meta'>{escape(fmt_aliases(n['aliases']))}</div>" if n["aliases"] else "") + "</td>"
                 f"<td>{escape(fmt_value(n['value']))}</td><td>{escape(n['unit'])}</td>"
                 f"<td>{escape(STATUS_LABELS.get(n['status'], n['status']))}</td>"
                 f"<td><code>{escape(n['formula'] or '')}</code></td><td>{escape(n['rationale'])}</td>"

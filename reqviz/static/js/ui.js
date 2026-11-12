@@ -126,6 +126,19 @@ export function fmtValue(v) {
   return String(v);
 }
 
+/** 別名の一覧を「種類: 名前」の小さな表示にする */
+export function aliasList(aliases) {
+  if (!aliases || !aliases.length) return null;
+  return h("div", { class: "aliases" }, aliases.map((a) => h("span", { class: "alias", title: a.label || "別名" },
+    a.label ? h("span", { class: "alias-label" }, a.label) : null, a.value)));
+}
+
+/** 文字列 t（小文字）が、パラメータの参照名・名前・別名・根拠のどれかに含まれるか */
+export function paramMatches(n, t) {
+  if (!t) return true;
+  return [n.ref, n.name, n.rationale, ...(n.aliases || []).map((a) => a.value)].some((v) => v && v.toLowerCase().includes(t));
+}
+
 /** 任意の値を 1 行で表示する（オブジェクト・配列は JSON、長いものは省略） */
 export function fmtAny(v, max = 160) {
   const text = v !== null && typeof v === "object" ? JSON.stringify(v) : fmtValue(v);

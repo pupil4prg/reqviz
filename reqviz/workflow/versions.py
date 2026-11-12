@@ -199,6 +199,8 @@ def restore_revision(ctx: Ctx, revision_id: int, comment: str = "") -> dict[str,
         if entity == "param":
             layer_id, pkey = _layer_id(ctx, sid, key)
             data = {k: target.get(k) for k in ("name", "type", "enum_options", "value", "unit", "source", "rationale", "ref_doc", "owner")}
+            if target.get("aliases") is not None:  # 別名の導入前に記録された履歴には含まれない（その場合は現状を維持）
+                data["aliases"] = target["aliases"]
             data.update(layer_id=layer_id, key=pkey)
             cur = repo.params_by_ref(ctx, sid).get(key)
             result = editing.update_param(ctx, cur["id"], data, comment) if cur else editing.create_param(ctx, sid, data, comment)

@@ -17,9 +17,10 @@ from ..repo import model as repo
 RULE_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}$")
 
 PARAM_SNAPSHOT_FIELDS = (
-    "ref", "name", "type", "enum_options", "value", "unit", "source",
+    "ref", "name", "aliases", "type", "enum_options", "value", "unit", "source",
     "rationale", "ref_doc", "owner", "status",
 )
+MAX_ALIASES = 20
 RULE_SNAPSHOT_FIELDS = ("key", "kind", "target", "expression", "nl_text", "severity", "description", "enabled")
 
 
@@ -38,6 +39,41 @@ def require_text(data: dict[str, Any], field: str, label: str) -> str:
     if not isinstance(v, str) or not v.strip():
         raise Invalid(f"{label}は必須です")
     return v.strip()
+
+
+def normalize_aliases(value: Any) -> list[dict[str, str]]:
+    """別名の一覧を ``[{"label": 種類, "value": 名前}]`` に正規化する。
+
+    種類（label）は「実装名」「論理名」などの自由な文字列で、空でもよい。
+    入力は、オブジェクトの配列のほか、文字列の配列（種類なし）と ``{種類: 名前}`` の形も受け付ける。
+    """
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        value = [{"label": k, "value": v} for k, v in value.items()]
+    if not isinstance(value, list):
+        raise Invalid("別名は配列で指定してください")
+    out: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for a in value:
+        if isinstance(a, str):
+            a = {"label": "", "value": a}
+        if not isinstance(a, dict):
+            raise Invalid("別名は {label, value} のオブジェクトで指定してください")
+        label, val = a.get("label") or "", a.get("value")
+        if not isinstance(label, str) or len(label.strip()) > 32:
+            raise Invalid("別名の種類は 32 文字以内の文字列で指定してください")
+        if not isinstance(val, str) or not val.strip():
+            raise Invalid("別名の名前が空です")
+        if len(val.strip()) > 200 or "\n" in val.strip():
+            raise Invalid("別名は 200 文字以内の 1 行で指定してください")
+        key = (label.strip(), val.strip())
+        if key not in seen:
+            seen.add(key)
+            out.append({"label": key[0], "value": key[1]})
+    if len(out) > MAX_ALIASES:
+        raise Invalid(f"別名が多すぎます（最大 {MAX_ALIASES} 件）")
+    return out
 
 
 def _update_row(ctx: Ctx, table: str, row_id: int, fields: dict[str, Any], row_version: int | None) -> None:
@@ -244,6 +280,8 @@ def _param_fields(ctx: Ctx, system_id: int, data: dict[str, Any], current: dict[
         fields["key"] = validate_identifier(data.get("key"), "パラメータキー")
     if "name" in data or current is None:
         fields["name"] = require_text(data, "name", "パラメータ名")
+    if "aliases" in data or current is None:
+        fields["aliases"] = dumps(normalize_aliases(data.get("aliases")))
     ptype = data.get("type", cur.get("type", "number"))
     if ptype not in PARAM_TYPES:
         raise Invalid(f"型が不正です: {ptype}")
