@@ -15,6 +15,7 @@ import * as aiView from "./views/ai.js";
 import * as settingsView from "./views/settings.js";
 import * as searchView from "./views/search.js";
 import * as componentsView from "./views/components.js";
+import * as environmentsView from "./views/environments.js";
 import * as loginView from "./views/login.js";
 import * as usersView from "./views/users.js";
 
@@ -29,6 +30,7 @@ const SYSTEM_TABS = [
   ["approvals", "承認", approvalsView],
   ["baselines", "版管理", baselinesView],
   ["ai", "AI", aiView],
+  ["environments", "環境", environmentsView],
   ["history", "履歴", historyView],
 ];
 
@@ -77,7 +79,8 @@ export async function refreshNav(sid) {
   const nav = document.getElementById("system-nav");
   if (!sid) { clear(nav); app.system = null; return; }
   try {
-    const [system, queue] = await Promise.all([api.get(`/api/systems/${sid}`), api.get(`/api/systems/${sid}/approvals`)]);
+    const [system, queue, envs] = await Promise.all([
+      api.get(`/api/systems/${sid}`), api.get(`/api/systems/${sid}/approvals`), api.get(`/api/systems/${sid}/environments`)]);
     // 応答待ちの間に画面が切り替わっていても、現在の URL に合わせて描画する
     const { parts } = parseHash();
     if (parts[0] !== "s" || Number(parts[1]) !== sid) return;
@@ -86,6 +89,10 @@ export async function refreshNav(sid) {
     const pending = queue.params.length + queue.items.length + queue.baselines.length + queue.upstream_changed.length;
     fill(nav, 
       h("span", { class: "sys-name", title: system.name }, system.name),
+      envs.length > 1 ? h("select", {
+        class: "env-switch", title: "環境を切り替える",
+        onchange: (e) => navigate(`#/s/${e.target.value}/${active}`),
+      }, envs.map((e) => h("option", { value: e.id, selected: e.id === sid }, e.env_name))) : null,
       SYSTEM_TABS.map(([key, label]) => h("a", { href: `#/s/${sid}/${key}`, class: key === active ? "active" : "" },
         label, key === "approvals" && pending ? h("span", { class: "badge in_review" }, pending) : null)),
     );

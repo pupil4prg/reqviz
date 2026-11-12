@@ -15,7 +15,7 @@ from ..repo import history
 from ..repo import model as repo
 from ..router import Request, Response, Router
 from ..errors import NotFound
-from ..workflow import analysis, baseline, components, editing, items, param_state, snapshot, tagging, templates, versions
+from ..workflow import analysis, baseline, components, editing, environments, items, param_state, snapshot, tagging, templates, versions
 
 router = Router()
 r = router.route
@@ -218,6 +218,55 @@ def systems_delete(req: Request) -> Any:
 @r("POST", "/api/systems/{sid:int}/clone")
 def systems_clone(req: Request) -> Any:
     return templates.clone_system(req.ctx, req.params["sid"], req.json().get("name") or "")
+
+
+# ---------------------------------------------------------------- 環境
+
+@r("GET", "/api/systems/{sid:int}/environments")
+def environments_list(req: Request) -> Any:
+    """同じシステムの環境（本番・開発など）の一覧。環境を分けていなければ自分だけ"""
+    return environments.list_environments(req.ctx, req.params["sid"])
+
+
+@r("POST", "/api/systems/{sid:int}/environments")
+def environments_create(req: Request) -> Any:
+    """このシステムを元に環境を追加する（key, name。初回は current_key, current_name も）"""
+    return environments.create_environment(req.ctx, req.params["sid"], req.json())
+
+
+@r("PUT", "/api/systems/{sid:int}/environment")
+def environment_update(req: Request) -> Any:
+    """このシステムの環境キー・環境名を変更する"""
+    return environments.update_environment(req.ctx, req.params["sid"], req.json())
+
+
+@r("DELETE", "/api/systems/{sid:int}/environment")
+def environment_detach(req: Request) -> Any:
+    """環境グループから外して、独立したシステムにする（データは消さない）"""
+    return environments.detach(req.ctx, req.params["sid"])
+
+
+@r("GET", "/api/systems/{sid:int}/environments/compare")
+def environments_compare(req: Request) -> Any:
+    """環境の間で、パラメータ・構成項目・ルールを並べて比較する"""
+    return environments.compare(req.ctx, req.params["sid"])
+
+
+@r("POST", "/api/systems/{sid:int}/environments/sync")
+def environments_sync(req: Request) -> Any:
+    """この環境の構成（定義・ルール）を他の環境に反映する。値は反映先のものを保つ（targets, delete_extra, preview）"""
+    data = req.json()
+    return environments.sync_structure(
+        req.ctx, req.params["sid"], _int_list(data.get("targets"), "targets"),
+        delete_extra=bool(data.get("delete_extra")), preview=bool(data.get("preview")), comment=data.get("comment") or "",
+    )
+
+
+@r("POST", "/api/systems/{sid:int}/environments/copy-values")
+def environments_copy_values(req: Request) -> Any:
+    """選んだ項目の値・採用案・本文を、この環境から別の環境へコピーする（target, refs）"""
+    data = req.json()
+    return environments.copy_values(req.ctx, req.params["sid"], data.get("target"), _str_list(data.get("refs"), "refs"), data.get("comment") or "")
 
 
 # ---------------------------------------------------------------- レイヤー
