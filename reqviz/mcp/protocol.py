@@ -37,7 +37,9 @@ TOOLS_TTL_MS = 3_600_000  # ツール定義はプロセスの生存中は変わ�
 INSTRUCTIONS = (
     "reqviz は、システムの要件から設計までの構成情報（パラメータ、実装方式などの選択肢、不定形データ、"
     "算出式・制約ルール）と、その承認・版・変更履歴を管理する。"
-    "まず list_systems でシステム ID を確認する。パラメータと構成項目は「レイヤーキー.キー」の参照名で識別する。"
+    "まず list_systems でシステム ID を確認する。本番・開発などの環境は環境ごとに別のシステム ID を持つ"
+    "（list_environments で確認し、compare_environments で比較できる）。"
+    "パラメータと構成項目は「レイヤーキー.キー」の参照名で識別する。"
     "値や採用案を変えると承認は下書きに戻り、下流のパラメータに要再計算が付くので、"
     "recalc → apply_proposals で反映する。過去の内容は get_timeline / get_state_at / diff_history で調べ、"
     "restore_revision で戻せる。"

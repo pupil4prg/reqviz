@@ -16,13 +16,13 @@ FORMAT = "reqviz/system"
 RULES_FORMAT = "reqviz/rules"
 FORMAT_VERSION = 1
 
-PARAM_FIELDS = ("layer", "key", "name", "aliases", "tags", "type", "enum_options", "value", "unit", "source", "rationale", "ref_doc", "owner")
+PARAM_FIELDS = ("layer", "key", "name", "aliases", "tags", "component", "type", "enum_options", "value", "unit", "source", "rationale", "ref_doc", "owner")
 RULE_FIELDS = ("key", "kind", "target", "expression", "nl_text", "severity", "description", "enabled")
 ITEM_FIELDS = (
-    "layer", "key", "name", "kind", "options", "selected", "content_type", "content",
+    "layer", "key", "name", "component", "kind", "options", "selected", "content_type", "content",
     "tags", "rationale", "ref_doc", "owner",
 )
-SECTIONS = ("layers", "params", "items", "rules", "relations")
+SECTIONS = ("layers", "components", "component_deps", "params", "items", "rules", "relations")
 
 
 def _rule_out(r: dict[str, Any]) -> dict[str, Any]:
@@ -55,6 +55,18 @@ def export_payload(ctx: Ctx, system_id: int, include_status: bool = True) -> dic
         "format_version": FORMAT_VERSION,
         "system": {"name": system["name"], "description": system["description"]},
         "layers": [{"key": l["key"], "name": l["name"], "sort_order": i} for i, l in enumerate(layers)],
+        "components": [
+            {"key": r["key"], "name": r["name"], "kind": r["kind"], "description": r["description"], "sort_order": i}
+            for i, r in enumerate(ctx.conn.execute(
+                "SELECT * FROM components WHERE system_id = ? ORDER BY sort_order, id", (system_id,)))
+        ],
+        "component_deps": [
+            {"from": r["from_key"], "to": r["to_key"], "note": r["note"], "notify": bool(r["notify"])}
+            for r in ctx.conn.execute(
+                "SELECT d.note, d.notify, f.key AS from_key, t.key AS to_key FROM component_deps d"
+                " JOIN components f ON f.id = d.from_component JOIN components t ON t.id = d.to_component"
+                " WHERE d.system_id = ? ORDER BY f.key, t.key", (system_id,))
+        ],
         "params": out_params,
         "items": out_items,
         "rules": [_rule_out(r) for r in repo.list_rules(ctx, system_id)],
@@ -86,8 +98,30 @@ def replace_with_payload(ctx: Ctx, system_id: int, payload: dict[str, Any], keep
     with transaction(ctx.conn):
         old = export_payload(ctx, system_id)
         old_state = entity_state(ctx, system_id)
-        for t in ("relations", "rules", "params", "items", "layers"):
+        for t in ("relations", "rules", "params", "items", "layers", "component_deps", "components"):
             ctx.conn.execute(f"DELETE FROM {t} WHERE system_id = ?", (system_id,))
+
+        component_ids: dict[str, int] = {}
+        for i, c in enumerate(sorted(payload.get("components", []), key=lambda x: x.get("sort_order", 0))):
+            key = editing.validate_identifier(c.get("key"), "コンポーネントキー")
+            if key in component_ids:
+                raise Invalid(f"コンポーネントキーが重複しています: {key}")
+            cur = ctx.conn.execute(
+                "INSERT INTO components (system_id, key, name, kind, description, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+                (system_id, key, c.get("name") or key, c.get("kind") or "", c.get("description") or "", i),
+            )
+            component_ids[key] = cur.lastrowid
+        for d in payload.get("component_deps", []):
+            f, t = d.get("from"), d.get("to")
+            if f not in component_ids or t not in component_ids or f == t:
+                raise Invalid(f"コンポーネントの依存の端点が不正です: {f} -> {t}")
+            try:
+                ctx.conn.execute(
+                    "INSERT INTO component_deps (system_id, from_component, to_component, note, notify) VALUES (?, ?, ?, ?, ?)",
+                    (system_id, component_ids[f], component_ids[t], d.get("note") or "", 1 if d.get("notify") else 0),
+                )
+            except Exception as e:
+                raise Invalid(f"コンポーネントの依存 {f} -> {t} を登録できません: {e}") from None
 
         layer_ids: dict[str, int] = {}
         for i, l in enumerate(sorted(payload.get("layers", []), key=lambda x: x.get("sort_order", 0))):
@@ -233,6 +267,8 @@ def diff_payloads(a: dict[str, Any], b: dict[str, Any]) -> dict[str, list[dict[s
 
     specs = {
         "layers": lambda x: x["key"],
+        "components": lambda x: x["key"],
+        "component_deps": lambda x: f"{x['from']}->{x['to']}",
         "params": lambda x: f"{x['layer']}.{x['key']}",
         "items": lambda x: f"{x['layer']}.{x['key']}",
         "rules": lambda x: x["key"],

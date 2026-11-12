@@ -14,13 +14,38 @@ export async function render(root) {
       h("div", { class: "row" }, h("h1", {}, "システム"), h("span", { class: "spacer" }),
         h("button", { class: "primary", onclick: () => createDialog(templates) }, "＋ 新規システム")),
       systems.length
-        ? h("div", { class: "cards" }, systems.map(systemCard))
+        ? h("div", { class: "cards" }, groupByEnvironment(systems).map((g) => (g.length > 1 || g[0].env_group_id ? envGroupCard(g) : systemCard(g[0]))))
         : h("div", { class: "empty card" }, "システムがありません。テンプレートから作成してみてください。"),
       h("div", { class: "row" }, h("h2", {}, "テンプレート"), h("span", { class: "spacer" }),
         h("button", { onclick: importTemplate }, "JSON から取り込み")),
       h("p", { class: "hint" }, "テンプレートはシステム作成時にコピーされます。テンプレートを更新しても、作成済みのシステムには反映されません。"),
       templates.length ? templateTable(templates) : h("div", { class: "empty card" }, "テンプレートはありません"),
     );
+  }
+
+  /** 同じ環境グループのシステムをまとめる（環境を分けていないものは 1 件ずつ） */
+  function groupByEnvironment(systems) {
+    const groups = new Map();
+    for (const s of systems) {
+      const k = s.env_group_id ? `g${s.env_group_id}` : `s${s.id}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(s);
+    }
+    return [...groups.values()];
+  }
+
+  function envGroupCard(group) {
+    const first = group[0];
+    return h("div", { class: "card" },
+      h("h3", {}, first.name, " ", h("span", { class: "badge" }, `${group.length} 環境`)),
+      first.description ? h("p", { class: "muted small" }, first.description) : null,
+      h("table", { class: "tbl", style: { marginTop: "6px" } }, group.map((s) => h("tr", {},
+        h("td", {}, h("a", { href: `#/s/${s.id}/graph` }, h("b", {}, s.env_name || s.name))),
+        h("td", { class: "small" }, `承認済み ${s.approved_count} / ${s.param_count}`),
+        h("td", { class: "small muted" }, s.current_baseline_version ? `v${s.current_baseline_version}` : "版なし"),
+        h("td", {}, h("button", { class: "small danger", title: "この環境を削除", onclick: () => removeSystem(s) }, "削除"))))),
+      h("div", { class: "row", style: { marginTop: "10px" } },
+        h("button", { class: "small", onclick: () => navigate(`#/s/${first.id}/environments`) }, "環境を比較")));
   }
 
   function systemCard(s) {

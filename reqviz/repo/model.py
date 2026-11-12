@@ -50,8 +50,8 @@ def get_layer(ctx: Ctx, layer_id: int) -> dict[str, Any]:
 
 
 _PARAM_SQL = """
-SELECT p.*, l.key AS layer_key, l.sort_order AS layer_order
-FROM params p JOIN layers l ON l.id = p.layer_id
+SELECT p.*, l.key AS layer_key, l.sort_order AS layer_order, c.key AS component, c.name AS component_name
+FROM params p JOIN layers l ON l.id = p.layer_id LEFT JOIN components c ON c.id = p.component_id
 """
 
 
@@ -135,8 +135,8 @@ def list_relations(ctx: Ctx, system_id: int) -> list[dict[str, Any]]:
 
 
 _ITEM_SQL = """
-SELECT i.*, l.key AS layer_key, l.sort_order AS layer_order
-FROM items i JOIN layers l ON l.id = i.layer_id
+SELECT i.*, l.key AS layer_key, l.sort_order AS layer_order, c.key AS component, c.name AS component_name
+FROM items i JOIN layers l ON l.id = i.layer_id LEFT JOIN components c ON c.id = i.component_id
 """
 
 

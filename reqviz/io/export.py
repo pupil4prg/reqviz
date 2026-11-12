@@ -12,11 +12,11 @@ from ..context import Ctx
 from ..db import now
 from ..engine.layout import COL_WIDTH, ROW_HEIGHT
 from ..repo import model as repo
-from ..workflow import analysis, baseline
+from ..workflow import analysis, baseline, components
 from ..workflow.param_state import STATUS_LABELS
 
 CSV_COLUMNS = [
-    ("layer_name", "レイヤー"), ("ref", "参照名"), ("name", "名前"), ("aliases", "別名"), ("tags", "タグ"), ("type", "型"),
+    ("layer_name", "レイヤー"), ("component_name", "コンポーネント"), ("ref", "参照名"), ("name", "名前"), ("aliases", "別名"), ("tags", "タグ"), ("type", "型"),
     ("value", "値"), ("unit", "単位"), ("status", "状態"), ("source", "値の出所"),
     ("formula", "算出式"), ("rationale", "根拠"), ("ref_doc", "出典"), ("owner", "担当"),
     ("flag_stale", "要再計算"), ("flag_upstream_changed", "承認後に上流変更あり"), ("violation", "制約違反"),
@@ -48,6 +48,7 @@ def to_csv(ctx: Ctx, system_id: int) -> bytes:
             **n,
             "layer_name": layer_names.get(n["layer_key"], n["layer_key"]),
             "aliases": fmt_aliases(n["aliases"]),
+            "component_name": n["component_name"] or "",
             "tags": "; ".join(n["tags"]),
             "value": fmt_value(n["value"]),
             "status": STATUS_LABELS.get(n["status"], n["status"]),
@@ -224,6 +225,27 @@ def to_html(ctx: Ctx, system_id: int) -> bytes:
                 h.append(f"<pre>{escape(body or '')}</pre>")
             if i["rationale"]:
                 h.append(f"<p>根拠: {escape(i['rationale'])}</p>")
+
+    comp = components.analysis(ctx, system_id)
+    if comp["components"]:
+        h.append("<h2>コンポーネントと依存関係</h2><table><tr><th>キー</th><th>名前</th><th>種別</th><th>説明</th>"
+                 "<th>パラメータ</th><th>構成項目</th><th>波及先</th></tr>")
+        for c in comp["components"]:
+            h.append(
+                f"<tr><td><code>{escape(c['key'])}</code></td><td>{escape(c['name'])}</td><td>{escape(c['kind'])}</td>"
+                f"<td>{escape(c['description'])}</td><td>{c['param_count']}</td><td>{c['item_count']}</td>"
+                f"<td>{escape(', '.join(c['downstream']))}</td></tr>"
+            )
+        h.append("</table>")
+        if comp["deps"]:
+            h.append("<table><tr><th>波及元</th><th>波及先</th><th>説明</th><th>裏付けとなるつながり</th></tr>")
+            for d in comp["deps"]:
+                links = "、".join(sorted({f"{l['from_ref']} → {l['to_ref']}" for l in d["links"]})) or "（なし）"
+                h.append(
+                    f"<tr><td>{escape(d['from_name'])}</td><td>{escape(d['to_name'])}</td><td>{escape(d['note'])}</td>"
+                    f"<td>{escape(links)}</td></tr>"
+                )
+            h.append("</table>")
 
     h.append("<h2>ルール一覧</h2><table><tr><th>キー</th><th>種別</th><th>対象</th><th>内容</th><th>重要度</th><th>説明</th></tr>")
     kind_labels = {"formula": "算出式", "constraint": "制約", "nl": "自然言語"}

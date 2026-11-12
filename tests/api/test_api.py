@@ -254,3 +254,63 @@ def test_tags_and_search_api(server):
 
     assert call(server, "POST", f"/api/systems/{sid}/tags/rename", {"from": "要確認", "to": "確認済み"})[1]["updated"] == ["db.max_connections", "os.max_open_files"]
     assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][0]["tags"] == []
+
+
+def test_components_api(server):
+    tpl = call(server, "GET", "/api/templates")[1][0]
+    sid = call(server, "POST", "/api/systems", {"name": "C", "template_id": tpl["id"]})[1]["id"]
+    st, mw, _ = call(server, "POST", f"/api/systems/{sid}/components", {"key": "mw", "name": "ミドルウェア", "kind": "MW"})
+    st, os_, _ = call(server, "POST", f"/api/systems/{sid}/components", {"key": "os", "name": "OS"})
+    assert st == 200 and call(server, "POST", f"/api/systems/{sid}/components", {"key": "os", "name": "x"})[0] == 422
+    assert call(server, "PUT", f"/api/components/{mw['id']}", {"description": "AP と DB"})[1]["description"] == "AP と DB"
+    assert call(server, "GET", f"/api/components/{mw['id']}")[1]["key"] == "mw"
+
+    st, res, _ = call(server, "POST", f"/api/systems/{sid}/components/assign", {"refs": ["db.max_connections", "db.pool_per_server"], "component": "mw"})
+    assert res["updated"] == ["db.max_connections", "db.pool_per_server"]
+    p = call(server, "GET", f"/api/systems/{sid}/params/by-ref/os.max_open_files")[1]
+    assert call(server, "PUT", f"/api/params/{p['id']}", {"component": "os"})[1]["component_name"] == "OS"
+    assert [c["param_count"] for c in call(server, "GET", f"/api/systems/{sid}/components")[1]] == [2, 1]
+
+    st, dep, _ = call(server, "POST", f"/api/systems/{sid}/component-deps", {"from": "mw", "to": "os", "note": "波及", "notify": True})
+    assert st == 200 and dep["notify"] is True
+    assert call(server, "POST", f"/api/systems/{sid}/component-deps", {"from": "mw", "to": "mw"})[0] == 422
+    assert call(server, "PUT", f"/api/component-deps/{dep['id']}", {"notify": False})[1]["notify"] is False
+    st, a, _ = call(server, "GET", f"/api/systems/{sid}/components/analysis")
+    assert a["deps"][0]["supported"] is True and a["deps"][0]["links"][0]["rule_key"] == "C-003"
+    assert a["components"][0]["downstream"] == ["os"] and len(a["unassigned"]["params"]) == 11
+    assert len(call(server, "GET", f"/api/systems/{sid}/component-deps")[1]) == 1
+    assert call(server, "GET", f"/api/systems/{sid}/graph")[1]["nodes"][-1]["component"] == "os"
+
+    assert call(server, "DELETE", f"/api/component-deps/{dep['id']}")[1] == {"ok": True}
+    assert call(server, "DELETE", f"/api/components/{os_['id']}")[1] == {"ok": True}
+    assert call(server, "GET", f"/api/params/{p['id']}")[1]["component"] is None
+
+
+def test_environments_api(server):
+    tpl = call(server, "GET", "/api/templates")[1][0]
+    prod = call(server, "POST", "/api/systems", {"name": "E", "template_id": tpl["id"]})[1]["id"]
+    assert [e["env_key"] for e in call(server, "GET", f"/api/systems/{prod}/environments")[1]] == [""]
+    assert call(server, "POST", f"/api/systems/{prod}/environments", {"key": "dev", "name": "開発"})[0] == 422
+    st, dev, _ = call(server, "POST", f"/api/systems/{prod}/environments", {"key": "dev", "name": "開発", "current_key": "prod", "current_name": "本番"})
+    assert st == 200 and dev["env_key"] == "dev" and dev["env_group_id"] == prod
+    systems = {s["id"]: s for s in call(server, "GET", "/api/systems")[1]}
+    assert systems[prod]["env_name"] == "本番" and systems[dev["id"]]["env_group_id"] == prod
+    assert call(server, "PUT", f"/api/systems/{dev['id']}/environment", {"name": "開発1"})[1]["env_name"] == "開発1"
+
+    p = call(server, "GET", f"/api/systems/{dev['id']}/params/by-ref/biz.peak_tps")[1]
+    call(server, "PUT", f"/api/params/{p['id']}", {"value": 20, "name": "ピーク TPS"})
+    st, c, _ = call(server, "GET", f"/api/systems/{prod}/environments/compare")
+    row = next(r for r in c["params"] if r["ref"] == "biz.peak_tps")
+    assert row["differs"] and row["definition_differs"] == ["name"] and c["summary"]["value_differences"] == 1
+
+    st, pre, _ = call(server, "POST", f"/api/systems/{dev['id']}/environments/sync", {"targets": [prod], "preview": True})
+    assert st == 200 and pre["targets"][0]["changes"] == 1
+    assert call(server, "POST", f"/api/systems/{dev['id']}/environments/sync", {"targets": [prod]})[1]["preview"] is False
+    assert call(server, "GET", f"/api/systems/{prod}/params/by-ref/biz.peak_tps")[1]["name"] == "ピーク TPS"
+    assert call(server, "POST", f"/api/systems/{dev['id']}/environments/sync", {"targets": "x"})[0] == 400
+    st, res, _ = call(server, "POST", f"/api/systems/{dev['id']}/environments/copy-values", {"target": prod, "refs": ["biz.peak_tps"]})
+    assert res["copied"] == ["biz.peak_tps"]
+    assert call(server, "POST", f"/api/systems/{dev['id']}/environments/copy-values", {"target": 999, "refs": ["biz.peak_tps"]})[0] == 422
+
+    assert call(server, "DELETE", f"/api/systems/{dev['id']}/environment")[1]["env_group_id"] is None
+    assert call(server, "GET", f"/api/systems/{prod}")[1]["env_group_id"] is None

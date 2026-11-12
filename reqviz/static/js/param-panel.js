@@ -20,7 +20,7 @@ const ACTION_LABELS = {
  * @param {number} paramId
  * @param {{sid:number, graph:object, onChange:Function, onTrace:Function}} opts
  */
-export async function renderParamPanel(container, paramId, { sid, graph, onChange, onTrace }) {
+export async function renderParamPanel(container, paramId, { sid, graph, onChange, onTrace, comps = [] }) {
   const p = await api.get(`/api/params/${paramId}`);
   const node = graph ? graph.nodes.find((n) => n.id === paramId) || {} : {};
   const rules = graph ? relatedRules(graph, p.ref) : [];
@@ -90,6 +90,7 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
     h("dl", { class: "kv" },
       h("dt", {}, "型"), h("dd", {}, TYPE_LABELS[p.type], p.type === "enum" ? `（${p.enum_options.join(" / ")}）` : ""),
       h("dt", {}, "値の出所"), h("dd", {}, SOURCE_LABELS[p.source]),
+      p.component ? [h("dt", {}, "コンポーネント"), h("dd", {}, h("a", { href: `#/s/${sid}/components` }, p.component_name))] : null,
       h("dt", {}, "更新"), h("dd", {}, fmtTime(p.updated_at))),
 
     p.has_proposal || p.proposed_error
@@ -153,7 +154,7 @@ export async function renderParamPanel(container, paramId, { sid, graph, onChang
 
     h("section", {}, h("h3", {}, "履歴"), historyList(p)),
     h("section", {}, h("div", { class: "row" },
-      graph ? h("button", { class: "small", onclick: () => paramDialog(sid, graph.layers, p, onChange) }, "定義を編集（名前・別名・型・キー）") : null,
+      graph ? h("button", { class: "small", onclick: () => paramDialog(sid, graph.layers, p, onChange, comps) }, "定義を編集（名前・別名・型・コンポーネント）") : null,
       h("button", { class: "small danger", onclick: remove }, "このパラメータを削除"))),
   );
 }

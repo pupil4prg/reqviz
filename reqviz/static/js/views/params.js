@@ -20,10 +20,15 @@ export async function render(root, { sid, query }) {
   let filterText = query.q || "";
   let filterStatus = "";
   let filterTag = query.tag || "";
+  let filterComp = query.component || "";  // "-" は未設定
 
   async function load() {
-    const graph = await api.get(`/api/systems/${sid}/graph`);
+    const [graph, comps] = await Promise.all([api.get(`/api/systems/${sid}/graph`), api.get(`/api/systems/${sid}/components`)]);
     const nodes = graph.nodes;
+    if (filterComp && filterComp !== "-" && !comps.some((c) => c.key === filterComp)) filterComp = "";
+    const compSel = h("select", { title: "コンポーネントで絞り込む" }, h("option", { value: "" }, "すべてのコンポーネント"),
+      comps.map((c) => h("option", { value: c.key, selected: filterComp === c.key }, c.name)),
+      h("option", { value: "-", selected: filterComp === "-" }, "（未設定）"));
     const selected = new Set();
     const dirty = new Map(); // id -> {el, node}
 
@@ -37,11 +42,12 @@ export async function render(root, { sid, query }) {
       allTags.map((t) => h("option", { value: t, selected: filterTag === t }, `${t}（${nodes.filter((n) => n.tags.includes(t)).length}）`)));
     const tbody = h("tbody");
     const bulkSel = h("select", {}, h("option", { value: "" }, "選択したものを…"), BULK_ACTIONS.map(([v, l]) => h("option", { value: v }, l)),
-      h("option", { value: "tags" }, "タグを付け外し…"));
+      h("option", { value: "tags" }, "タグを付け外し…"), comps.length ? h("option", { value: "component" }, "コンポーネントを設定…") : null);
     const saveBtn = h("button", { class: "primary", disabled: true, onclick: saveAll }, "変更を保存");
 
     function visible(n) {
       if (filterTag && !n.tags.includes(filterTag)) return false;
+      if (filterComp && (filterComp === "-" ? n.component : n.component !== filterComp)) return false;
       if (filterStatus === "stale" ? !n.flag_stale : filterStatus && n.status !== filterStatus) return false;
       return paramMatches(n, filterText.trim().toLowerCase());
     }
@@ -76,7 +82,8 @@ export async function render(root, { sid, query }) {
       rat.addEventListener("input", () => markDirty(n, "rationale", rat));
       return h("tr", {},
         h("td", {}, cb),
-        h("td", {}, h("a", { href: `#/s/${sid}/graph?ref=${encodeURIComponent(n.ref)}` }, n.name), h("div", { class: "mono small muted" }, n.ref), aliasList(n.aliases)),
+        h("td", {}, h("a", { href: `#/s/${sid}/graph?ref=${encodeURIComponent(n.ref)}` }, n.name), h("div", { class: "mono small muted" }, n.ref), aliasList(n.aliases),
+          n.component ? h("div", { class: "small muted" }, "▣ ", n.component_name) : null),
         h("td", { class: "small" }, TYPE_LABELS[n.type]),
         h("td", { style: { minWidth: "130px" } }, n.formula ? h("div", { title: n.formula }, h("span", { class: "muted small" }, "ƒ "), fmtValue(n.value) || "∅",
           n.has_proposal ? h("div", { class: "small", style: { color: "var(--stale)" } }, `案: ${fmtValue(n.proposed_value)}`) : null) : val),
@@ -127,11 +134,30 @@ export async function render(root, { sid, query }) {
       });
     }
 
+    function bulkComponent() {
+      const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+      const refs = [...selected].map((id) => byId[id].ref);
+      const sel = h("select", {}, h("option", { value: "" }, "（未設定に戻す）"), comps.map((c) => h("option", { value: c.key }, c.name)));
+      modal({
+        title: `コンポーネントを設定（${refs.length} 件）`,
+        body: [h("label", { class: "field" }, "コンポーネント", sel), h("p", { class: "hint" }, "所属を変えても、承認の状態は変わりません。")],
+        buttons: [{ label: "キャンセル" }, {
+          label: "設定", primary: true,
+          onClick: async () => {
+            const res = await api.post(`/api/systems/${sid}/components/assign`, { refs, component: sel.value || null });
+            toast(`${res.updated.length} 件を設定しました`);
+            await load();
+          },
+        }],
+      });
+    }
+
     async function bulk() {
       const action = bulkSel.value;
       bulkSel.value = "";
       if (!action || !selected.size) return;
       if (action === "tags") return bulkTags();
+      if (action === "component") return bulkComponent();
       try {
         const res = await api.post(`/api/systems/${sid}/transition`, { param_ids: [...selected], action });
         toast(`${res.ok.length} 件を処理しました${res.failed.length ? `（${res.failed.length} 件は対象外）` : ""}`, res.failed.length ? "error" : "info");
@@ -152,6 +178,7 @@ export async function render(root, { sid, query }) {
     search.addEventListener("input", () => { filterText = search.value; renderRows(); });
     statusSel.addEventListener("change", () => { filterStatus = statusSel.value; renderRows(); });
     tagSel.addEventListener("change", () => { filterTag = tagSel.value; renderRows(); });
+    compSel.addEventListener("change", () => { filterComp = compSel.value; renderRows(); });
     const allCb = h("input", {
       type: "checkbox", title: "表示中をすべて選択",
       onchange: (e) => { nodes.filter(visible).forEach((n) => (e.target.checked ? selected.add(n.id) : selected.delete(n.id))); renderRows(); },
@@ -160,8 +187,8 @@ export async function render(root, { sid, query }) {
     renderRows();
     fill(page, 
       h("div", { class: "row" }, h("h1", {}, "パラメータ"), h("span", { class: "spacer" }),
-        h("button", { onclick: () => paramDialog(sid, graph.layers, null, load) }, "＋ パラメータ")),
-      h("div", { class: "row", style: { marginBottom: "10px" } }, search, statusSel, tagSel, h("span", { class: "spacer" }), bulkSel, saveBtn),
+        h("button", { onclick: () => paramDialog(sid, graph.layers, null, load, comps) }, "＋ パラメータ")),
+      h("div", { class: "row", style: { marginBottom: "10px" } }, search, statusSel, tagSel, comps.length ? compSel : null, h("span", { class: "spacer" }), bulkSel, saveBtn),
       h("div", { class: "table-wrap" }, h("table", { class: "tbl" },
         h("thead", {}, h("tr", {}, h("th", {}, allCb), ["名前", "型", "値", "単位", "根拠", "タグ", "出所", "状態", "フラグ"].map((x) => h("th", {}, x)))),
         tbody)),
@@ -173,7 +200,7 @@ export async function render(root, { sid, query }) {
 }
 
 /** パラメータ作成・定義編集ダイアログ（p が null なら新規） */
-export function paramDialog(sid, layers, p, onDone) {
+export function paramDialog(sid, layers, p, onDone, comps = []) {
   const layer = h("select", {}, layers.map((l) => h("option", { value: l.id, selected: p && p.layer_id === l.id }, l.name)));
   const key = h("input", { value: p ? p.key : "", placeholder: "英数字（例: max_threads）" });
   const name = h("input", { value: p ? p.name : "", placeholder: "例: 最大スレッド数" });
@@ -197,6 +224,7 @@ export function paramDialog(sid, layers, p, onDone) {
     h("div", { class: "row" }, h("button", { class: "small", type: "button", onclick: () => aliasBox.append(aliasRow({ label: "", value: "" })) }, "＋ 別名を追加"),
       h("span", { class: "hint" }, "設定ファイル上のパラメータ名や、日本語の論理名などを登録できます。検索の対象になります。")));
   const tags = h("input", { value: p ? p.tags.join(", ") : "", placeholder: "カンマ区切り（例: 開発中, DB）" });
+  const comp = h("select", {}, h("option", { value: "" }, "（未設定）"), comps.map((c) => h("option", { value: c.key, selected: p && p.component === c.key }, c.name)));
   const syncType = () => { optsField.style.display = type.value === "enum" ? "" : "none"; };
   type.addEventListener("change", syncType);
   syncType();
@@ -211,7 +239,7 @@ export function paramDialog(sid, layers, p, onDone) {
       optsField,
       h("label", { class: "field" }, "値", value),
       h("label", { class: "field" }, "根拠", rationale),
-      h("label", { class: "field" }, "タグ", tags),
+      h("div", { class: "grid2" }, h("label", { class: "field" }, "タグ", tags), comps.length ? h("label", { class: "field" }, "コンポーネント", comp) : h("span")),
       h("p", { class: "hint" }, "式からは「レイヤーキー.キー」で参照します。キーを変更すると、ルールの式も自動で書き換わります。"),
     ],
     buttons: [{ label: "キャンセル" }, {
@@ -226,6 +254,7 @@ export function paramDialog(sid, layers, p, onDone) {
           layer_id: Number(layer.value), key: key.value.trim(), name: name.value, type: t,
           enum_options: t === "enum" ? opts.value.split(",").map((x) => x.trim()).filter(Boolean) : [],
           value: v, unit: unit.value, rationale: rationale.value, tags: parseTags(tags.value),
+          ...(comps.length ? { component: comp.value || null } : {}),
           aliases: [...aliasBox.children].map((row) => ({
             label: row.querySelector('[data-f="label"]').value.trim(), value: row.querySelector('[data-f="value"]').value.trim(),
           })).filter((a) => a.value),

@@ -17,7 +17,7 @@ from ..repo import model as repo
 RULE_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}$")
 
 PARAM_SNAPSHOT_FIELDS = (
-    "ref", "name", "aliases", "tags", "type", "enum_options", "value", "unit", "source",
+    "ref", "name", "aliases", "tags", "component", "type", "enum_options", "value", "unit", "source",
     "rationale", "ref_doc", "owner", "status",
 )
 MAX_ALIASES = 20
@@ -75,6 +75,25 @@ def normalize_aliases(value: Any) -> list[dict[str, str]]:
     if len(out) > MAX_ALIASES:
         raise Invalid(f"別名が多すぎます（最大 {MAX_ALIASES} 件）")
     return out
+
+
+def resolve_component(ctx: Ctx, system_id: int, data: dict[str, Any]) -> int | None:
+    """入力の ``component``（キー）または ``component_id`` から、コンポーネントの ID を得る（未分類は None）。"""
+    if data.get("component"):
+        row = ctx.conn.execute(
+            "SELECT id FROM components WHERE system_id = ? AND key = ?", (system_id, data["component"])
+        ).fetchone()
+        if row is None:
+            raise Invalid(f"コンポーネントが存在しません: {data['component']}")
+        return row["id"]
+    if data.get("component_id") and "component" not in data:
+        row = ctx.conn.execute(
+            "SELECT id FROM components WHERE system_id = ? AND id = ?", (system_id, data["component_id"])
+        ).fetchone()
+        if row is None:
+            raise Invalid(f"コンポーネントが存在しません: {data['component_id']}")
+        return row["id"]
+    return None
 
 
 def normalize_tags(value: Any) -> list[str]:
@@ -312,6 +331,8 @@ def _param_fields(ctx: Ctx, system_id: int, data: dict[str, Any], current: dict[
         fields["aliases"] = dumps(normalize_aliases(data.get("aliases")))
     if "tags" in data or current is None:
         fields["tags"] = dumps(normalize_tags(data.get("tags")))
+    if "component" in data or "component_id" in data or current is None:
+        fields["component_id"] = resolve_component(ctx, system_id, data)
     ptype = data.get("type", cur.get("type", "number"))
     if ptype not in PARAM_TYPES:
         raise Invalid(f"型が不正です: {ptype}")
@@ -420,9 +441,38 @@ def update_param(ctx: Ctx, param_id: int, data: dict[str, Any], comment: str = "
 def propagate_value_change(ctx: Ctx, system_id: int, refs: Iterable[str]) -> flags.FlagUpdate:
     params, rules = repo.load_engine_model(ctx, system_id)
     statuses = {p.ref: p.status for p in params}
+    refs = list(refs)
     upd = flags.propagate_change(refs, calc.formula_edges(rules), statuses)
+    upd.upstream_changed |= _component_notify_targets(ctx, system_id, refs)
     set_flags(ctx, system_id, upd.stale, upd.upstream_changed)
     return upd
+
+
+def _component_notify_targets(ctx: Ctx, system_id: int, changed: list[str]) -> set[str]:
+    """「変更を知らせる」設定の依存をたどり、波及先コンポーネントの承認済みパラメータを返す。
+
+    値は変わっていないので要再計算にはせず、「承認後に上流変更あり」として確認を促す。
+    たどるのは直接の依存先だけ（波及先の値が実際に変わったら、そこからまた伝わる）。
+    """
+    if not changed:
+        return set()
+    marks = ", ".join("?" * len(changed))
+    rows = ctx.conn.execute(
+        f"""
+        WITH src AS (
+          SELECT p.component_id FROM params p JOIN layers l ON l.id = p.layer_id
+          WHERE p.system_id = ? AND l.key || '.' || p.key IN ({marks})
+          UNION
+          SELECT i.component_id FROM items i JOIN layers l ON l.id = i.layer_id
+          WHERE i.system_id = ? AND l.key || '.' || i.key IN ({marks})
+        )
+        SELECT l.key || '.' || p.key AS ref
+        FROM component_deps d JOIN params p ON p.component_id = d.to_component JOIN layers l ON l.id = p.layer_id
+        WHERE d.notify = 1 AND d.from_component IN (SELECT component_id FROM src) AND p.status = 'approved'
+        """,
+        [system_id, *changed, system_id, *changed],
+    )
+    return {r["ref"] for r in rows} - set(changed)
 
 
 def set_flags(ctx: Ctx, system_id: int, stale: Iterable[str], upstream_changed: Iterable[str]) -> None:
